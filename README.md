@@ -8,6 +8,69 @@ model, or the cloud (GitHub Copilot in *Auto* mode).
 No agent loop, no RAG, no vector store, no web UI, no plugin system. One
 process, one YAML file, one job.
 
+## Quick start
+
+The minimal setup is Copilot-only: it works on any machine with a GitHub
+Copilot subscription and no local model.
+
+1. **Install** (Python 3.11+):
+
+   ```bash
+   python3 -m venv .venv
+   .venv/bin/pip install -e .
+   ```
+
+2. **Sign in to GitHub Copilot** (device-code flow: prints a URL + code
+   to enter in the browser):
+
+   ```bash
+   .venv/bin/meatproxy copilot login
+   ```
+
+   The Copilot CLI runtime is downloaded automatically on first use.
+
+3. **Write a config** — `meatproxy.yaml` in the working directory, or
+   pass `--config` / `MEATPROXY_CONFIG`:
+
+   ```yaml
+   api:
+     host: 127.0.0.1
+     port: 8700
+
+   models:
+     copilot:
+       tier: heavy
+       kind: copilot
+
+   routing:
+     chains:
+       heavy: [copilot]
+
+   conversations:
+     db_path: meatproxy.db
+   ```
+
+   With no triage model, `model: "auto"` goes straight to the heavy
+   chain. To add local models (NPU/GPU) or triage, copy one of the
+   examples in `config/` instead — they use Docker-style `/data/...`
+   paths, so adjust `conversations.db_path` and `copilot.base_directory`
+   when running outside Docker (omitting `base_directory` uses
+   `~/.copilot`, where `copilot login` stores credentials by default).
+
+4. **Run** it:
+
+   ```bash
+   MEATPROXY_API_KEY=... .venv/bin/meatproxy
+   ```
+
+5. **Point your IDE at it** — the OpenAI-compatible API at
+   `http://127.0.0.1:8700/v1`, the API key as bearer token, model
+   `auto` (or `copilot`). Sanity check:
+
+   ```bash
+   curl -s http://127.0.0.1:8700/health
+   ```
+
 ## How it works
 
 ```
@@ -173,11 +236,9 @@ subcommand the proxy runs, so `docker run <image>` and
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest
-
-# run locally (copy a config first)
-cp config/example.npu-only.yaml meatproxy.yaml
-MEATPROXY_API_KEY=dev MEATPROXY_CONFIG=meatproxy.yaml .venv/bin/meatproxy
 ```
+
+Run locally as in the [Quick start](#quick-start).
 
 ## Metrics
 
