@@ -1,4 +1,4 @@
-"""Copilot adapter: session pooling and the conversations_active gauge.
+"""Copilot adapter: session pooling, gauge, ephemeral session cleanup.
 
 Uses a fake SDK (monkeypatched into copilot_adapter._copilot) so no real
 Copilot runtime or subscription is needed.
@@ -114,6 +114,22 @@ def _install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
 
 
 # -- tests ----------------------------------------------------------------------
+
+
+async def test_ephemeral_session_disconnected(monkeypatch):
+    """Stateless requests create an ephemeral session that must be released
+    after the turn (no conversation id -> not pooled)."""
+    client = _install_fake_sdk(monkeypatch)
+    conversations_active.set(0)
+    adapter = ca.CopilotAdapter(CopilotSpec())
+
+    events = [ev async for ev in adapter.stream("hi")]
+
+    assert "".join(ev.text for ev in events) == "hello world"
+    assert len(client.created) == 1
+    assert client.created[0].disconnected is True
+    assert adapter.active_sessions() == 0
+    assert conversations_active._value.get() == 0
 
 
 async def test_pooled_session_gauge_and_stop(monkeypatch):

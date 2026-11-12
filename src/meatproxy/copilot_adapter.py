@@ -8,7 +8,7 @@ Copilot is an *agent runtime*, not a chat API, so this adapter:
   conversation id). Live sessions are pooled and resumed across evictions
   via ``resume_session`` — session state persists in ``base_directory``,
   which should be a durable volume.
-* maps stateless requests to ephemeral sessions.
+* maps stateless requests to ephemeral sessions (disconnected after the turn).
 * disables built-in tools (``available_tools=[]``): meatproxy is a proxy,
   not an agent sandbox, so Copilot answers with text only and the
   request's ``tools`` are deliberately dropped on this path.
@@ -301,6 +301,11 @@ class CopilotAdapter:
         finally:
             with contextlib.suppress(Exception):
                 unsubscribe()
-            entry = self._sessions.get(conversation_id or "")
-            if entry is not None:
-                entry.last_active = asyncio.get_event_loop().time()
+            if conversation_id:
+                entry = self._sessions.get(conversation_id)
+                if entry is not None:
+                    entry.last_active = asyncio.get_event_loop().time()
+            else:
+                # stateless request: the session was ephemeral, release it
+                with contextlib.suppress(Exception):
+                    await session.disconnect()
