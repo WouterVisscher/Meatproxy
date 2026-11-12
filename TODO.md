@@ -26,8 +26,19 @@ Open questions:
 `usage.completion_tokens >= budget`, or content empty with reasoning
 tokens present — regardless of `finish_reason`.
 
-## NPU triage tuning
+## Triage tuning
 
+- Current local setup: Qwen3 0.6B on CPU (llama.cpp :8080, 4 threads, 4k
+  ctx) with `timeout_s: 5` — the original 2s budget was too tight for
+  4000-char prefills on CPU.
+- The classifier prompt now asks for a one-line `tier | brief decision
+  summary` (2026-11-12, for debug logging). Re-verify the "do NOT shorten"
+  finding below with the new format on the 7B/NPU models.
+- Externalize the default triage system prompt: ship it as a packaged text
+  file, add an optional `routing.triage.prompt_file` (resolved relative to
+  the YAML config), read once at config load. Keep inline `prompt`; reject
+  both set at once; fail clearly on a missing/empty file. Editing the file
+  requires a restart (no file watching).
 - Profile triage latency on NPU under concurrent load (single call ~1s,
   queued calls up to ~9s observed). `triage.timeout_s` is 10–20 in test
   configs; the original plan assumed 2s.
@@ -50,8 +61,10 @@ tokens present — regardless of `finish_reason`.
   (classic PATs unverified).
 - Verify session resume across evictions/restarts on the real runtime.
 - Consider: forward IDE conversation state into Copilot sessions on cold
-  resume (currently relies on Copilot's own persisted session state in
-  `base_directory`).
+  resume for *text-only* turns (still relies on Copilot's own persisted
+  session state in `base_directory`). Tool-bearing turns already replay
+  the full transcript into a fresh session via the terminal-tool bridge
+  (`copilot_tools`).
 
 ## Misc
 
