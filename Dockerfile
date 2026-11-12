@@ -19,7 +19,10 @@ RUN pip install --no-cache-dir .
 USER meatproxy
 RUN python -m copilot download-runtime
 
-# persistent state: SQLite conversations + Copilot session state / login
+# persistent state: SQLite conversations + Copilot session state / login.
+# Mount a volume at /meatproxy.yaml (config) and at the Copilot home
+# (default: /home/meatproxy/.copilot) so `meatproxy copilot login --yes`
+# persists across container runs.
 ENV MEATPROXY_CONFIG=/meatproxy.yaml
 VOLUME ["/data"]
 
@@ -27,4 +30,4 @@ EXPOSE 8700
 
 USER meatproxy
 WORKDIR /home/meatproxy
-ENTRYPOINT ["python", "-m", "meatproxy"]
+ENTRYPOINT ["meatproxy", "serve"]

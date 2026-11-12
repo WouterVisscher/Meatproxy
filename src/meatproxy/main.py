@@ -420,6 +420,22 @@ def create_app(
         if any(spec.kind == "copilot" for spec in cfg.models.values()):
             try:
                 await copilot.start()
+                status = await copilot.auth_status()
+                if status:
+                    if status["authenticated"]:
+                        emit(
+                            log,
+                            logging.INFO,
+                            "copilot: logged in as",
+                            login=status["login"],
+                            host=status["host"],
+                        )
+                    else:
+                        emit(
+                            log,
+                            logging.INFO,
+                            "copilot: not logged in (run 'meatproxy copilot login' to enable copilot models)",
+                        )
             except Exception as e:
                 emit(
                     log,
@@ -614,11 +630,23 @@ def create_app(
 # ---------------------------------------------------------------------------
 
 
-def run() -> None:
-    setup_logging(os.environ.get("MEATPROXY_LOG_LEVEL", "info"))
-    config_path = os.environ.get("MEATPROXY_CONFIG", "meatproxy.yaml")
+def serve(
+    config_path: str | os.PathLike,
+    host: str | None = None,
+    port: int | None = None,
+) -> None:
+    """Run the proxy from an explicit config path (and optional overrides)."""
+    config_path = os.path.expanduser(str(config_path))
     app = create_app(config_path)
     cfg: Config = app.state.state.manager.get()
-    port = int(os.environ.get("MEATPROXY_PORT", cfg.port))
-    emit(log, logging.INFO, "starting", host=cfg.host, port=port, config=config_path)
-    uvicorn.run(app, host=cfg.host, port=port, log_config=None)
+    host = host or cfg.host
+    port = port if port is not None else int(os.environ.get("MEATPROXY_PORT", cfg.port))
+    emit(log, logging.INFO, "starting", host=host, port=port, config=config_path)
+    uvicorn.run(app, host=host, port=port, log_config=None)
+
+
+def run() -> None:
+    """Legacy entrypoint: env-var driven (MEATPROXY_CONFIG / MEATPROXY_PORT)."""
+    setup_logging(os.environ.get("MEATPROXY_LOG_LEVEL", "info"))
+    config_path = os.environ.get("MEATPROXY_CONFIG", "meatproxy.yaml")
+    serve(config_path)

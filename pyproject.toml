@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-meatproxy = "meatproxy.main:run"
+meatproxy = "meatproxy.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/meatproxy"]

@@ -123,17 +123,49 @@ docker run -d --name meatproxy \
 
 ### Copilot auth
 
-meatproxy uses the [GitHub Copilot SDK](https://github.com/github/copilot-sdk)
-(Python). Two options:
+meatproxy signs in to GitHub Copilot through the
+[GitHub Copilot SDK](https://github.com/github/copilot-sdk) (Python).
+Sign in once; a running proxy picks the credentials up from the copilot
+`base_directory` with no restart or config change:
 
-1. **`copilot login` (recommended)**: run `copilot login` on the host, then
-   mount the directory holding those credentials (normally `~/.copilot`) as
-   the copilot `base_directory` (e.g. `/data/copilot`).
-2. **Token**: set an env var with a GitHub token and point
-   `[copilot] token_env` at it, e.g. `token_env = "COPILOT_GITHUB_TOKEN"`.
+```bash
+meatproxy copilot login        # device-code flow (prints a URL + code)
+meatproxy copilot status       # show the sign-in state
+meatproxy copilot logout       # sign out
+```
+
+`login` defaults to the device-code flow (works from any terminal,
+including containers); `--web` uses the browser variant, and
+`--token <token>` / `--token-stdin` install a GitHub token instead of
+interactive sign-in. In a container there is no loopback browser or
+keychain, so use `--yes` (accepts plaintext token storage, no
+interactive prompts):
+
+```bash
+docker run -it --rm <image> copilot login --yes
+```
+
+The token alternative for the server remains: set an env var with a
+GitHub token and point `[copilot] token_env` at it, e.g.
+`token_env = "COPILOT_GITHUB_TOKEN"`.
 
 The Copilot CLI runtime is downloaded at image build time
 (`python -m copilot download-runtime`), so the image is self-contained.
+
+## CLI
+
+```
+meatproxy [serve]             run the proxy (default)
+meatproxy copilot login       sign in to GitHub Copilot (--web, --token, --token-stdin)
+meatproxy copilot status      show the Copilot sign-in state
+meatproxy copilot logout      sign out
+meatproxy config check        validate the config file
+meatproxy version             print the version
+```
+
+Flags override the `MEATPROXY_*` environment variables. With no
+subcommand the proxy runs, so `docker run <image>` and
+`python -m meatproxy` keep working unchanged.
 
 ## Development
 
@@ -144,7 +176,7 @@ python3 -m venv .venv
 
 # run locally (copy a config first)
 cp config/example.npu-only.yaml meatproxy.yaml
-MEATPROXY_API_KEY=dev MEATPROXY_CONFIG=meatproxy.yaml .venv/bin/python -m meatproxy
+MEATPROXY_API_KEY=dev MEATPROXY_CONFIG=meatproxy.yaml .venv/bin/meatproxy
 ```
 
 ## Metrics

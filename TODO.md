@@ -39,9 +39,13 @@ tokens present — regardless of `finish_reason`.
 
 ## Copilot
 
-- Live test of the Copilot adapter still pending (needs a GitHub
-  Copilot subscription + `copilot login` or token; runtime is already
-  baked into the Docker image).
+- Copilot sign-in works end-to-end (`meatproxy copilot login`,
+  device-code flow; credentials land in the copilot home the server
+  uses). Live test of the Copilot adapter — requests through a running
+  proxy — still pending (needs a GitHub Copilot subscription; runtime
+  is already baked into the Docker image).
+- `copilot login --token`: verify which token kinds the runtime accepts
+  (classic PATs unverified).
 - Verify session resume across evictions/restarts on the real runtime.
 - Consider: forward IDE conversation state into Copilot sessions on cold
   resume (currently relies on Copilot's own persisted session state in

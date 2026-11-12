@@ -146,6 +146,24 @@ class CopilotAdapter:
             self._client = client
             return client
 
+    # -- auth status ---------------------------------------------------------
+
+    async def auth_status(self) -> dict | None:
+        """Best-effort auth status of the shared client (None if not started
+        or the status call fails; startup logging must stay non-fatal)."""
+        if self._client is None:
+            return None
+        try:
+            st = await self._client.get_auth_status()
+        except Exception:
+            return None
+        return {
+            "authenticated": bool(st.isAuthenticated),
+            "login": st.login,
+            "host": st.host,
+            "status_message": st.statusMessage,
+        }
+
     # -- session pool ------------------------------------------------------
 
     def active_sessions(self) -> int:
