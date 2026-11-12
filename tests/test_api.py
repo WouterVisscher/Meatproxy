@@ -107,6 +107,22 @@ async def test_non_stream_request(client, fakes):
     assert body["usage"]["total_tokens"] == 7
 
 
+async def test_omitted_stream_defaults_to_non_stream(client, fakes):
+    """OpenAI default: no `stream` field means a JSON (non-streaming) response.
+
+    The AI SDK omits `stream` for non-streaming calls; returning SSE there
+    made clients fail with 'Invalid JSON response'.
+    """
+    r = await client.post(
+        "/v1/chat/completions",
+        headers=auth(),
+        json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+    assert not r.headers["content-type"].startswith("text/event-stream")
+    assert r.json()["object"] == "chat.completion"
+
+
 async def test_models_endpoint(client):
     r = await client.get("/v1/models", headers=auth())
     assert r.status_code == 200

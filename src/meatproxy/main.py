@@ -2,7 +2,7 @@
 
 Endpoints
 ---------
-POST /v1/chat/completions   chat (streaming SSE by default)
+POST /v1/chat/completions   chat (SSE when stream: true; JSON by default, like OpenAI)
 GET  /v1/models             virtual model list (auto + configured models)
 GET  /v1/conversations      list stored conversations
 DELETE /v1/conversations/{id}
@@ -438,7 +438,7 @@ def create_app(
         model = str(body.get("model") or AUTO_MODEL)
         messages = body.get("messages")
         _validate_messages(messages)
-        stream = bool(body.get("stream", True))
+        stream = bool(body.get("stream", False))
         extra = _extra_params(body)
         cfg = state.manager.get()
 

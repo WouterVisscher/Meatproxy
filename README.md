@@ -85,7 +85,7 @@ file is rejected and the old config stays active.
 
 | Endpoint | Description |
 | --- | --- |
-| `POST /v1/chat/completions` | OpenAI-compatible chat; `stream: true` (default) → SSE |
+| `POST /v1/chat/completions` | OpenAI-compatible chat; JSON by default, `stream: true` → SSE |
 | `GET /v1/models` | `auto` + all configured models |
 | `GET /v1/conversations` | list stored conversations |
 | `DELETE /v1/conversations/{id}` | delete a conversation |
