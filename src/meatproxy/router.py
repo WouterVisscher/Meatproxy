@@ -73,26 +73,56 @@ class Router:
                     triage.classify(prompt), timeout=triage.spec.timeout_s
                 )
             except Exception as e:
-                triage_latency_seconds.observe(time.monotonic() - started)
+                elapsed = time.monotonic() - started
+                triage_latency_seconds.observe(elapsed)
                 triage_decisions_total.labels(tier="failed", cached="false").inc()
-                return self._fallback_plan(
+                plan = self._fallback_plan(
                     cfg,
                     triage.spec,
                     reason=f"triage failed ({type(e).__name__}: {e})",
                     source="triage-failure",
                 )
-            triage_latency_seconds.observe(time.monotonic() - started)
+                log.debug(
+                    "triage failed; using fallback",
+                    extra={"kv": {
+                        "triage_model": triage.spec.model,
+                        "tier": plan.tier,
+                        "model": plan.models[0].name,
+                        "chain": [m.name for m in plan.models],
+                        "source": plan.source,
+                        "error_type": type(e).__name__,
+                        "latency_ms": round(elapsed * 1000, 3),
+                    }},
+                )
+                return plan
+            elapsed = time.monotonic() - started
+            triage_latency_seconds.observe(elapsed)
             triage_decisions_total.labels(tier=decision.tier, cached=str(decision.cached)).inc()
             models = cfg.chain_for(decision.tier)
             if not models:
                 # the tier has no chain (key absent from routing.chains)
-                return self._fallback_plan(
+                plan = self._fallback_plan(
                     cfg,
                     triage.spec,
                     reason=f"triage picked tier {decision.tier!r} with no chain",
                     source="triage-failure",
                 )
-            return RoutePlan(tier=decision.tier, models=models, source="auto")
+            else:
+                plan = RoutePlan(tier=decision.tier, models=models, source="auto")
+            log.debug(
+                "triage decision",
+                extra={"kv": {
+                    "triage_model": triage.spec.model,
+                    "chosen_tier": decision.tier,
+                    "tier": plan.tier,
+                    "model": plan.models[0].name,
+                    "chain": [m.name for m in plan.models],
+                    "source": plan.source,
+                    "cached": decision.cached,
+                    "latency_ms": round(elapsed * 1000, 3),
+                }},
+            )
+            return plan
 
         # triage disabled: go to the highest tier that has a chain
         for tier in AUTO_TIER_FALLBACKS:

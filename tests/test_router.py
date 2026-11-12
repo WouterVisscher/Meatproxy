@@ -1,5 +1,7 @@
 """Router: plan selection and up-chain failover."""
 
+import logging
+
 import httpx
 import pytest
 
@@ -64,6 +66,45 @@ async def test_direct_plan(tmp_path, fakes):
     plan = await router.plan("onprem", "anything", cfg)
     assert plan.source == "direct"
     assert [m.name for m in plan.models] == ["onprem"]
+
+
+@pytest.mark.parametrize("prompt, tier, model", [
+    ("hello", "light", "npu-small"),
+    ("please refactor the architecture", "heavy", "onprem"),
+])
+async def test_triage_debug_decision(tmp_path, fakes, caplog, prompt, tier, model):
+    router, cfg, _ = make_router(tmp_path, fakes)
+    with caplog.at_level(logging.DEBUG, logger="meatproxy.router"):
+        await router.plan("auto", prompt, cfg)
+        await router.plan("auto", prompt, cfg)
+    records = [r for r in caplog.records if r.getMessage() == "triage decision"]
+    assert len(records) == 2
+    for record, cached in zip(records, [False, True]):
+        assert record.kv["triage_model"] == "npu-small"
+        assert record.kv["chosen_tier"] == tier
+        assert record.kv["tier"] == tier
+        assert record.kv["model"] == model
+        assert record.kv["chain"][0] == model
+        assert record.kv["source"] == "auto"
+        assert record.kv["cached"] is cached
+        assert record.kv["latency_ms"] >= 0
+        assert prompt not in str(record.kv)
+
+
+async def test_triage_debug_fallback(tmp_path, fakes, caplog):
+    fakes["npu"].fail = True
+    router, cfg, _ = make_router(tmp_path, fakes)
+    with caplog.at_level(logging.DEBUG, logger="meatproxy.router"):
+        await router.plan("auto", "private prompt", cfg)
+    record = next(r for r in caplog.records if r.getMessage() == "triage failed; using fallback")
+    assert record.kv["triage_model"] == "npu-small"
+    assert record.kv["model"] == "onprem"
+    assert record.kv["tier"] == cfg.model("onprem").tier
+    assert record.kv["chain"] == ["onprem"]
+    assert record.kv["source"] == "triage-failure"
+    assert record.kv["error_type"]
+    assert record.kv["latency_ms"] >= 0
+    assert "private prompt" not in str(record.kv)
 
 
 async def test_auto_plan_light(tmp_path, fakes):
