@@ -1,0 +1,37 @@
+api:
+  host: 0.0.0.0
+  port: 8700
+
+models:
+  # Local small model on the AMD NPU, served by Lemonade (FastFlowLM) —
+  # OpenAI-compatible API. Used for light requests AND for triage.
+  npu-small:
+    tier: light
+    endpoint: http://npu-host:11434/v1
+    model: fastflow-small
+    timeout_s: 60
+  # Cloud: GitHub Copilot via the Copilot SDK, in "auto" model mode.
+  copilot:
+    tier: heavy
+    kind: copilot
+
+routing:
+  triage:
+    model: npu-small          # model used to classify the incoming prompt
+    timeout_s: 2              # triage budget; on failure -> on_failure
+    on_failure: copilot       # route here when triage is unavailable/slow
+    cache_ttl_s: 300          # cache triage decisions by prompt hash
+  chains:                     # fallback order per triage tier (escalates up)
+    light: [npu-small, copilot]
+    mid: [copilot]
+    heavy: [copilot]
+
+conversations:
+  db_path: /data/meatproxy.db
+  max_context_messages: 40
+  copilot_idle_timeout_s: 900
+
+copilot:
+  base_directory: /data/copilot   # mount the dir where `copilot login` credentials live
+  auto_tier: ""                   # optional: efficiency | balance | intelligence | fast
+  timeout_s: 60                   # budget for the first token

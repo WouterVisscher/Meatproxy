@@ -1,0 +1,43 @@
+api:
+  host: 0.0.0.0
+  port: 8700
+
+models:
+  # Local small model on the AMD NPU, served by Lemonade (FastFlowLM).
+  npu-small:
+    tier: light
+    endpoint: http://npu-host:11434/v1
+    model: fastflow-small
+    timeout_s: 60
+  # On-prem / GPU box (vLLM or any OpenAI-compatible server).
+  onprem-vllm:
+    tier: mid
+    endpoint: http://gpu-box:8000/v1
+    model: qwen2.5-coder-32b
+    timeout_s: 120
+    # api_key_env: ONPREM_API_KEY   # optional: reference a secret by env name
+  # Cloud: GitHub Copilot via the Copilot SDK, in "auto" model mode.
+  copilot:
+    tier: heavy
+    kind: copilot
+
+routing:
+  triage:
+    model: npu-small
+    timeout_s: 2
+    on_failure: copilot
+    cache_ttl_s: 300
+  chains:
+    light: [npu-small, onprem-vllm, copilot]
+    mid: [onprem-vllm, copilot]
+    heavy: [copilot, onprem-vllm]
+
+conversations:
+  db_path: /data/meatproxy.db
+  max_context_messages: 40
+  copilot_idle_timeout_s: 900
+
+copilot:
+  base_directory: /data/copilot
+  auto_tier: ""
+  timeout_s: 60

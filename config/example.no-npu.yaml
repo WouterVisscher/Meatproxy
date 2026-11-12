@@ -1,0 +1,31 @@
+# Device without an NPU: triage is disabled, "auto" routes to the top
+# available tier (heavy -> mid -> light, in that order).
+api:
+  host: 0.0.0.0
+  port: 8700
+
+models:
+  onprem-vllm:
+    tier: mid
+    endpoint: http://gpu-box:8000/v1
+    model: qwen2.5-coder-32b
+    timeout_s: 120
+  copilot:
+    tier: heavy
+    kind: copilot
+
+routing:
+  chains:
+    light: [onprem-vllm, copilot]
+    mid: [onprem-vllm, copilot]
+    heavy: [copilot, onprem-vllm]
+
+conversations:
+  db_path: /data/meatproxy.db
+  max_context_messages: 40
+  copilot_idle_timeout_s: 900
+
+copilot:
+  base_directory: /data/copilot
+  auto_tier: ""
+  timeout_s: 60
