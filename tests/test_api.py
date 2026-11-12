@@ -79,6 +79,28 @@ async def test_failover_to_next_model(client, fakes):
     assert all(c["model"] == "onprem" for c in chunks if c.get("choices"))
 
 
+async def test_sse_error_payload_triggers_failover(client, fakes):
+    """Upstreams may deliver errors as SSE payloads inside an HTTP 200
+    (Lemonade does this for context overflow). That must be treated as a
+    failure and fail over, not passed through as a choiceless chunk —
+    which would yield an empty response to the client.
+    """
+    fakes["npu"].stream_error = (
+        "max_length (34048) cannot be greater than model context_length (32768)"
+    )
+    r = await client.post(
+        "/v1/chat/completions",
+        headers=auth(),
+        json={"model": "auto", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+    chunks = parse_sse(r.text)
+    # triage says "light" -> npu-small stream errors -> fail over to onprem
+    assert all(c["model"] == "onprem" for c in chunks if c.get("choices"))
+    assert any("hello from qwen" in c["choices"][0]["delta"].get("content", "") for c in chunks)
+    assert all("error" not in c for c in chunks)
+
+
 async def test_all_models_down_returns_error_event(client, fakes):
     fakes["npu"].fail = True
     fakes["gpu"].fail = True

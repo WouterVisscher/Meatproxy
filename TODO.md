@@ -49,6 +49,13 @@ tokens present — regardless of `finish_reason`.
 
 ## Misc
 
+- NPU context limit (32768) is too small for agentic IDE traffic: opencode's
+  system prompt + tools + history reaches ~34K tokens, so every agentic
+  request fails over from npu-7b to on-prem (works, ~100ms overhead). The
+  NPU still serves triage (short prompt) and small non-agentic requests.
+  Consider a `context_window` model config option so the router can skip
+  an over-context model proactively (estimate tokens from chars+tools)
+  instead of paying the failed attempt each time.
 - WSL2 note: NPU models are only servable in mirror networking mode
   (NAT mode → `model_not_supported: Requires Windows`).
 - `model` field in upstream responses can be an opaque hash (Lemonade

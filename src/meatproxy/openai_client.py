@@ -49,6 +49,13 @@ class FirstChunkTimeout(UpstreamError):
     """No first token within the model's timeout budget."""
 
 
+def _error_message(error: Any) -> str:
+    """Extract a human-readable message from an upstream ``error`` field."""
+    if isinstance(error, dict):
+        return str(error.get("message") or error)
+    return str(error)
+
+
 @dataclass
 class RawChunk:
     """One upstream OpenAI chat.completion.chunk, model field already rewritten."""
@@ -126,6 +133,15 @@ class OpenAIBackend:
                 if payload == "[DONE]":
                     return
                 chunk = json.loads(payload)
+                # Some servers (e.g. Lemonade) answer errors as an SSE payload
+                # inside an HTTP 200: data: {"error": {...}}. Treat that as a
+                # failure so the router can fail over instead of passing a
+                # choiceless chunk to the client.
+                if isinstance(chunk, dict) and "error" in chunk and "choices" not in chunk:
+                    raise UpstreamError(
+                        f"upstream {self.base_url} stream error: "
+                        f"{_error_message(chunk['error'])}"
+                    )
                 yield RawChunk(data=chunk)
 
     async def complete(
@@ -147,6 +163,10 @@ class OpenAIBackend:
                 status_code=response.status_code,
             )
         data = response.json()
+        if isinstance(data, dict) and "error" in data and "choices" not in data:
+            raise UpstreamError(
+                f"upstream {self.base_url} error: {_error_message(data['error'])}"
+            )
         try:
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError) as e:

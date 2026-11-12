@@ -31,6 +31,7 @@ class FakeUpstream:
         self.fail = False
         self.fail_models: set[str] = set()
         self.triage_delay = 0.0
+        self.stream_error: str | None = None  # answer streams with an SSE error payload
         self.requests: list[dict[str, Any]] = []
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
@@ -58,6 +59,18 @@ class FakeUpstream:
         model = body["model"]
         if self.fail or model in self.fail_models:
             return httpx.Response(503, text="upstream boom")
+
+        if body.get("stream") and self.stream_error:
+            # Some servers (e.g. Lemonade NPU) deliver errors as an SSE
+            # payload inside an HTTP 200 instead of using an error status.
+            payload = json.dumps(
+                {"error": {"message": self.stream_error, "type": "inference_error"}}
+            )
+            return httpx.Response(
+                200,
+                text=f"data: {payload}\n\ndata: [DONE]\n\n",
+                headers={"Content-Type": "text/event-stream"},
+            )
 
         if body.get("stream"):
             chunks = [
