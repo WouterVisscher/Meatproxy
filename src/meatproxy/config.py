@@ -171,6 +171,8 @@ def load_config(path: str | Path) -> Config:
     for tier, names in chains_raw.items():
         if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
             raise ConfigError(f"routing.chains.{tier} must be a list of model names")
+        if not names:
+            raise ConfigError(f"routing.chains.{tier} must not be empty")
         chains[str(tier)] = list(names)
 
     conv_raw = _section(raw, "conversations", required=False)

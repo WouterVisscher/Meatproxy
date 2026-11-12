@@ -55,6 +55,12 @@ def test_unknown_triage_model(tmp_path):
         load_config(_write(tmp_path, bad))
 
 
+def test_empty_chain_rejected(tmp_path):
+    bad = VALID.replace("light: [small, big]", "light: []")
+    with pytest.raises(ConfigError, match="must not be empty"):
+        load_config(_write(tmp_path, bad))
+
+
 def test_bad_tier(tmp_path):
     bad = VALID.replace("tier: light", "tier: tiny")
     with pytest.raises(ConfigError, match="tier"):

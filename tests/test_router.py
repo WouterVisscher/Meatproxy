@@ -19,8 +19,9 @@ TRIAGE_BLOCK = """  triage:
 """
 
 
-def make_router(tmp_path, fakes, triage: bool = True):
-    content = TEST_CONFIG.replace("__DB__", str(tmp_path / "conv.db")).replace(
+def make_router(tmp_path, fakes, triage: bool = True, content: str | None = None):
+    base = content if content is not None else TEST_CONFIG
+    content = base.replace("__DB__", str(tmp_path / "conv.db")).replace(
         "__COPILOT__", str(tmp_path / "copilot")
     )
     if not triage:
@@ -112,6 +113,17 @@ async def test_run_exhausts_chain(tmp_path, fakes):
     plan = await router.plan("onprem", "hi", cfg)
     with pytest.raises(Exception):
         [ev async for ev in router.run(plan, [{"role": "user", "content": "hi"}], {}, None)]
+
+
+async def test_triage_picks_tier_without_chain(tmp_path, fakes):
+    """Triage may pick a tier that has no chain (key absent from
+    routing.chains); the router must fall back to the triage on_failure
+    model instead of producing an empty plan."""
+    content = TEST_CONFIG.replace("    light: [npu-small, onprem]\n", "")
+    router, cfg, _ = make_router(tmp_path, fakes, content=content)
+    plan = await router.plan("auto", "hello", cfg)  # no trigger word -> "light"
+    assert plan.source == "triage-failure"
+    assert plan.models[0].name == "onprem"
 
 
 async def test_triage_timeout_routes_to_on_failure(tmp_path, fakes):

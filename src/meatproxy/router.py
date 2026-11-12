@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from .config import AUTO_TIER_FALLBACKS, Config, ConfigError, ModelSpec
+from .config import AUTO_TIER_FALLBACKS, Config, ConfigError, ModelSpec, TriageSpec
 from .metrics import failovers_total, triage_decisions_total, triage_latency_seconds
 from .openai_client import StreamEvent, UpstreamError
 
@@ -74,28 +74,44 @@ class Router:
             except Exception as e:
                 triage_latency_seconds.observe(time.monotonic() - started)
                 triage_decisions_total.labels(tier="failed", cached="false").inc()
-                target = triage.spec.on_failure or _first_chain_model(cfg)
-                if target is None:
-                    raise ConfigError("no models configured")
-                log.warning(
-                    "triage failed (%s: %s); routing to %s", type(e).__name__, e, target
-                )
-                return RoutePlan(
-                    tier=cfg.model(target).tier,
-                    models=cfg.chain_for_model(target),
+                return self._fallback_plan(
+                    cfg,
+                    triage.spec,
+                    reason=f"triage failed ({type(e).__name__}: {e})",
                     source="triage-failure",
                 )
             triage_latency_seconds.observe(time.monotonic() - started)
             triage_decisions_total.labels(tier=decision.tier, cached=str(decision.cached)).inc()
-            return RoutePlan(
-                tier=decision.tier, models=cfg.chain_for(decision.tier), source="auto"
-            )
+            models = cfg.chain_for(decision.tier)
+            if not models:
+                # the tier has no chain (key absent from routing.chains)
+                return self._fallback_plan(
+                    cfg,
+                    triage.spec,
+                    reason=f"triage picked tier {decision.tier!r} with no chain",
+                    source="triage-failure",
+                )
+            return RoutePlan(tier=decision.tier, models=models, source="auto")
 
         # triage disabled: go to the highest tier that has a chain
         for tier in AUTO_TIER_FALLBACKS:
             if cfg.chains.get(tier):
                 return RoutePlan(tier=tier, models=cfg.chain_for(tier), source="auto-default")
         raise ConfigError("no routing chains configured")
+
+    def _fallback_plan(
+        self, cfg: Config, spec: TriageSpec, reason: str, source: str
+    ) -> RoutePlan:
+        """Plan for the triage on_failure model (or the first available chain)."""
+        target = spec.on_failure or _first_chain_model(cfg)
+        if target is None:
+            raise ConfigError("no models configured")
+        log.warning("%s; routing to %s", reason, target)
+        return RoutePlan(
+            tier=cfg.model(target).tier,
+            models=cfg.chain_for_model(target),
+            source=source,
+        )
 
     # -- execution ------------------------------------------------------------
 
