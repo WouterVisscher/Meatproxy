@@ -1,4 +1,4 @@
-# meatproxy
+# 🥩 meatproxy
 
 A small, unbloated LLM router in Python. An IDE points its OpenAI client at
 meatproxy; meatproxy uses a **small local model on your NPU** to triage each
@@ -8,7 +8,7 @@ model, or the cloud (GitHub Copilot in *Auto* mode).
 No agent loop, no RAG, no vector store, no web UI, no plugin system. One
 process, one YAML file, one job.
 
-## Quick start
+## 🚀 Quick start
 
 The minimal setup is Copilot-only: it works on any machine with a GitHub
 Copilot subscription and no local model.
@@ -71,7 +71,7 @@ Copilot subscription and no local model.
    curl -s http://127.0.0.1:8700/health
    ```
 
-## How it works
+## ⚙️ How it works
 
 ```
 IDE ──OpenAI API (SSE)──▶ meatproxy (FastAPI, Docker, SQLite)
@@ -105,7 +105,7 @@ IDE ──OpenAI API (SSE)──▶ meatproxy (FastAPI, Docker, SQLite)
   sessions (state in the mounted `base_directory`), pooled with an idle
   timeout and resumed across evictions.
 
-## Configuration (YAML)
+## 📝 Configuration (YAML)
 
 See `config/example.npu-only.yaml`, `config/example.npu-gpu.yaml` and
 `config/example.no-npu.yaml`. Secrets are referenced by env-var name, never
@@ -145,7 +145,7 @@ The config file is **hot-reloaded** when its mtime changes; an invalid new
 file is rejected (logged once per file version) and the old config keeps
 serving.
 
-## API
+## 🔌 API
 
 | Endpoint | Description |
 | --- | --- |
@@ -171,7 +171,7 @@ curl -N http://localhost:8700/v1/chat/completions \
   -d '{"model": "auto", "stream": true, "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
-## Running with Docker
+## 🐳 Running with Docker
 
 ```bash
 docker run -d --name meatproxy \
@@ -184,7 +184,7 @@ docker run -d --name meatproxy \
 
 `/data` holds the SQLite DB and the Copilot session state.
 
-### Copilot auth
+### 🔐 Copilot auth
 
 meatproxy signs in to GitHub Copilot through the
 [GitHub Copilot SDK](https://github.com/github/copilot-sdk) (Python).
@@ -215,7 +215,7 @@ GitHub token and point `[copilot] token_env` at it, e.g.
 The Copilot CLI runtime is downloaded at image build time
 (`python -m copilot download-runtime`), so the image is self-contained.
 
-## CLI
+## 💻 CLI
 
 ```
 meatproxy [serve]             run the proxy (default)
@@ -230,7 +230,7 @@ Flags override the `MEATPROXY_*` environment variables. With no
 subcommand the proxy runs, so `docker run <image>` and
 `python -m meatproxy` keep working unchanged.
 
-## Development
+## 🛠️ Development
 
 ```bash
 python3 -m venv .venv
@@ -238,9 +238,9 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-Run locally as in the [Quick start](#quick-start).
+Run locally as in the [Quick start](#-quick-start).
 
-## Metrics
+## 📊 Metrics
 
 `meatproxy_requests_total{model,tier,source}`,
 `meatproxy_failovers_total{from_model,to_model}`,
