@@ -92,6 +92,11 @@ file is rejected and the old config stays active.
 | `GET /health` | backend reachability |
 | `GET /metrics` | Prometheus metrics |
 
+TLS to on-prem backends uses the default (certifi) CA store. For gateways
+behind an internal CA, set `ca_bundle: /path/to/ca-bundle.crt` on the model
+(the whole endpoint uses it); `ssl_insecure: true` disables verification
+entirely (loudly discouraged).
+
 All `/v1/*` endpoints require `Authorization: Bearer $MEATPROXY_API_KEY`.
 
 ```bash

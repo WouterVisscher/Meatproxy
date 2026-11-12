@@ -42,6 +42,26 @@ class BackendPool:
             await self._registry.aclose_all()
 
 
+def _endpoint_verify(cfg: Config, endpoint: str) -> bool | str:
+    """Resolve the TLS verification setting for an endpoint.
+
+    First model on the endpoint wins (consistent with _first_api_key).
+    """
+    for spec in cfg.models.values():
+        if spec.kind != "openai" or spec.endpoint != endpoint:
+            continue
+        if spec.ssl_insecure:
+            log.warning(
+                "model %s: TLS verification DISABLED for %s — do not use on a shared network",
+                spec.name,
+                endpoint,
+            )
+            return False
+        if spec.ca_bundle:
+            return spec.ca_bundle
+    return True
+
+
 def build_registry(
     cfg: Config,
     transport_factory: TransportFactory | None = None,
@@ -64,6 +84,7 @@ def build_registry(
                 endpoint,
                 api_key=_first_api_key(cfg, endpoint),
                 timeout_s=timeouts[endpoint],
+                verify=_endpoint_verify(cfg, endpoint),
                 transport=transport_factory(endpoint) if transport_factory else None,
             )
         upstream[name] = spec.model

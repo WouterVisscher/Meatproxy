@@ -75,6 +75,7 @@ class OpenAIBackend:
         endpoint: str,
         api_key: str | None = None,
         timeout_s: float = 60.0,
+        verify: bool | str = True,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = endpoint.rstrip("/")
@@ -85,6 +86,7 @@ class OpenAIBackend:
             base_url=self.base_url,
             headers=headers,
             timeout=httpx.Timeout(timeout_s, connect=5.0),
+            verify=verify,
             transport=transport,
         )
 

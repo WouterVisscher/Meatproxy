@@ -33,6 +33,8 @@ class ModelSpec:
     model: str | None = None  # upstream model name (OpenAI backends)
     api_key_env: str | None = None
     timeout_s: float = 60.0
+    ca_bundle: str | None = None  # path to a CA bundle for internal CAs
+    ssl_insecure: bool = False  # skip TLS verification entirely (not recommended)
 
     def __post_init__(self) -> None:
         if self.kind not in ("openai", "copilot"):
@@ -127,6 +129,8 @@ def _model_spec(name: str, raw: Any) -> ModelSpec:
         model=raw.get("model"),
         api_key_env=raw.get("api_key_env"),
         timeout_s=float(raw.get("timeout_s", 60.0)),
+        ca_bundle=raw.get("ca_bundle"),
+        ssl_insecure=bool(raw.get("ssl_insecure", False)),
     )
 
 

@@ -16,6 +16,8 @@ models:
     model: qwen2.5-coder-32b
     timeout_s: 120
     # api_key_env: ONPREM_API_KEY   # optional: reference a secret by env name
+    # ca_bundle: /etc/ssl/certs/ca-certificates.crt  # for internal CAs (https)
+    # ssl_insecure: false           # skip TLS verification (not recommended)
   # Cloud: GitHub Copilot via the Copilot SDK, in "auto" model mode.
   copilot:
     tier: heavy
