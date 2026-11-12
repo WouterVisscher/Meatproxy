@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 from .config import AUTO_TIER_FALLBACKS, Config, ConfigError, ModelSpec, TriageSpec
 from .metrics import failovers_total, triage_decisions_total, triage_latency_seconds
 from .openai_client import StreamEvent, UpstreamError
+from .copilot_tools import has_tool_history, stream_tools
 
 if TYPE_CHECKING:
     from .copilot_adapter import CopilotAdapter
@@ -127,12 +128,18 @@ class Router:
             started = False
             try:
                 if spec.kind == "copilot":
-                    events: AsyncIterator[StreamEvent] = self.copilot.stream(
-                        prompt=_prompt_from_messages(messages),
-                        conversation_id=conversation_id,
-                        model=spec.model or "auto",
-                        timeout_s=spec.timeout,
-                    )
+                    if "tools" in extra or "tool_choice" in extra or has_tool_history(messages):
+                        events: AsyncIterator[StreamEvent] = stream_tools(
+                            self.copilot, messages, extra, spec.model or "auto",
+                            spec.name, spec.timeout,
+                        )
+                    else:
+                        events = self.copilot.stream(
+                            prompt=_prompt_from_messages(messages),
+                            conversation_id=conversation_id,
+                            model=spec.model or "auto",
+                            timeout_s=spec.timeout,
+                        )
                 else:
                     events = self.get_registry().stream(
                         spec.name, messages, extra, spec.timeout

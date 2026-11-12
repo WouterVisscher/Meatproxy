@@ -1,4 +1,4 @@
-# 🥩 meatproxy
+# :cut_of_meat: meatproxy
 
 A small, unbloated LLM router in Python. An IDE points its OpenAI client at
 meatproxy; meatproxy uses a **small local model on your NPU** to triage each
@@ -8,7 +8,7 @@ model, or the cloud (GitHub Copilot in *Auto* mode).
 No agent loop, no RAG, no vector store, no web UI, no plugin system. One
 process, one YAML file, one job.
 
-## 🚀 Quick start
+## :rocket: Quick start
 
 The minimal setup is Copilot-only: it works on any machine with a GitHub
 Copilot subscription and no local model.
@@ -71,7 +71,7 @@ Copilot subscription and no local model.
    curl -s http://127.0.0.1:8700/health
    ```
 
-## ⚙️ How it works
+## :gear: How it works
 
 ```
 IDE ──OpenAI API (SSE)──▶ meatproxy (FastAPI, Docker, SQLite)
@@ -89,8 +89,8 @@ IDE ──OpenAI API (SSE)──▶ meatproxy (FastAPI, Docker, SQLite)
         │ (Lemonade NPU,      │  CLI runtime process,      │  adapter)
         │  vLLM/GPU)          │  model="auto")
         └─────────────────────┴────────────────────────────┴──────────────────
-        tools pass through verbatim on OpenAI backends; Copilot path is
-        text-only (it is itself an agent, so `tools` are dropped there)
+        tools pass through on OpenAI backends; Copilot bridges client
+        function tools through terminal SDK tools (no server-side execution)
 ```
 
 - **`model: "auto"`** (the default) runs triage on the NPU and picks a tier:
@@ -102,10 +102,55 @@ IDE ──OpenAI API (SSE)──▶ meatproxy (FastAPI, Docker, SQLite)
 - **Conversations**: send an `X-Conversation-Id` header and only the newest
   user message; meatproxy stores history in SQLite and rebuilds context for
   stateless backends. Copilot conversations map to persistent Copilot
-  sessions (state in the mounted `base_directory`), pooled with an idle
-  timeout and resumed across evictions.
+  sessions for text-only turns (state in `base_directory`), pooled with an
+  idle timeout and resumed across evictions. Tool-bearing turns use the
+  transcript-based bridge below instead.
 
-## 📝 Configuration (YAML)
+### :toolbox: Tool calling with auto routing
+
+`model: "auto"` supports client-executed **function tools on both routes**:
+
+- **Local/on-prem OpenAI backends:** `tools`, `tool_choice`,
+  `parallel_tool_calls`, assistant calls and tool results pass through.
+- **Copilot:** client functions become terminal SDK tools. A requested
+  function is returned as an OpenAI `tool_calls` response with
+  `finish_reason: "tool_calls"`. The Copilot runtime ends its turn without
+  executing the function. Built-in and MCP tools remain unavailable.
+
+Your IDE runs the requested tools and sends their actual results back:
+
+```json
+{
+  "model": "auto",
+  "tools": [{"type": "function", "function": {"name": "echo", "parameters": {"type": "object"}}}],
+  "messages": [
+    {"role": "user", "content": "Use echo"},
+    {"role": "assistant", "tool_calls": [{"id": "call_example", "type": "function", "function": {"name": "echo", "arguments": "{}"}}]},
+    {"role": "tool", "tool_call_id": "call_example", "content": "Actual result from the IDE"}
+  ]
+}
+```
+
+Use the call IDs and arguments returned by the proxy, not the illustrative
+values above. Both streaming and non-streaming responses support calls.
+Copilot supports `tool_choice: "auto"`, `"none"`, `"required"`, or a named
+function. `parallel_tool_calls: false` limits it to one forwarded call per
+turn. Tools themselves must be supported by the selected OpenAI backend.
+
+Normally, send the full OpenAI message history (as OpenCode does). With
+`X-Conversation-Id`, send the newest user message or the complete batch of
+tool-result messages; the proxy stores calls and preserves `tool_call_id`
+when rebuilding history. Tool results must match the pending calls.
+
+**Copilot bridge limitation:** each tool-bearing request uses a fresh SDK
+session, with system/developer instructions in its system message and the
+remaining transcript serialized as JSON. This is not native OpenAI message
+replay, and it has extra context/latency cost. It avoids keeping paused
+runtime handlers across requests, so triage/failover can select either
+backend on the next turn. Pending IDE tool calls are never automatically
+executed or retried by meatproxy. Use Copilot SDK 1.0.31 or newer.
+
+## :memo: Configuration (YAML)
 
 See `config/example.npu-only.yaml`, `config/example.npu-gpu.yaml` and
 `config/example.no-npu.yaml`. Secrets are referenced by env-var name, never
@@ -145,7 +190,7 @@ The config file is **hot-reloaded** when its mtime changes; an invalid new
 file is rejected (logged once per file version) and the old config keeps
 serving.
 
-## 🔌 API
+## :electric_plug: API
 
 | Endpoint | Description |
 | --- | --- |
@@ -171,7 +216,7 @@ curl -N http://localhost:8700/v1/chat/completions \
   -d '{"model": "auto", "stream": true, "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
-## 🐳 Running with Docker
+## :whale: Running with Docker
 
 ```bash
 docker run -d --name meatproxy \
@@ -184,7 +229,7 @@ docker run -d --name meatproxy \
 
 `/data` holds the SQLite DB and the Copilot session state.
 
-### 🔐 Copilot auth
+### :closed_lock_with_key: Copilot auth
 
 meatproxy signs in to GitHub Copilot through the
 [GitHub Copilot SDK](https://github.com/github/copilot-sdk) (Python).
@@ -215,7 +260,7 @@ GitHub token and point `[copilot] token_env` at it, e.g.
 The Copilot CLI runtime is downloaded at image build time
 (`python -m copilot download-runtime`), so the image is self-contained.
 
-## 💻 CLI
+## :computer: CLI
 
 ```
 meatproxy [serve]             run the proxy (default)
@@ -230,7 +275,7 @@ Flags override the `MEATPROXY_*` environment variables. With no
 subcommand the proxy runs, so `docker run <image>` and
 `python -m meatproxy` keep working unchanged.
 
-## 🛠️ Development
+## :hammer_and_wrench: Development
 
 ```bash
 python3 -m venv .venv
@@ -238,9 +283,9 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-Run locally as in the [Quick start](#-quick-start).
+Run locally as in the [Quick start](#rocket-quick-start).
 
-## 📊 Metrics
+## :bar_chart: Metrics
 
 `meatproxy_requests_total{model,tier,source}`,
 `meatproxy_failovers_total{from_model,to_model}`,

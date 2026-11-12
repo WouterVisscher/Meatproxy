@@ -33,6 +33,7 @@ class FakeUpstream:
         self.triage_delay = 0.0
         self.stream_error: str | None = None  # answer streams with an SSE error payload
         self.requests: list[dict[str, Any]] = []
+        self.tool_calls: list[dict[str, Any]] | None = None
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         if request.method == "GET" and request.url.path.endswith("/models"):
@@ -73,6 +74,15 @@ class FakeUpstream:
             )
 
         if body.get("stream"):
+            if self.tool_calls and body.get("tools") and body["messages"][-1]["role"] != "tool":
+                chunks = [
+                    {"model": model, "choices": [{"index": 0, "delta": {
+                        "tool_calls": [dict(call, index=i) for i, call in enumerate(self.tool_calls)]
+                    }, "finish_reason": None}]},
+                    {"model": model, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+                text = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+                return httpx.Response(200, text=text, headers={"Content-Type": "text/event-stream"})
             chunks = [
                 {
                     "id": "c-1",

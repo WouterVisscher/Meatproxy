@@ -180,10 +180,35 @@ def _validate_messages(messages: Any) -> None:
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="'messages' must be a non-empty list")
     for msg in messages:
-        if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+        if not isinstance(msg, dict) or "role" not in msg:
             raise HTTPException(
                 status_code=400, detail="each message needs 'role' and 'content'"
             )
+        if "content" not in msg and not (msg["role"] == "assistant" and msg.get("tool_calls")):
+            raise HTTPException(status_code=400, detail="each message needs 'role' and 'content'")
+        if msg["role"] == "tool" and (
+            not isinstance(msg.get("tool_call_id"), str) or not msg["tool_call_id"]
+        ):
+            raise HTTPException(status_code=400, detail="tool messages need 'tool_call_id'")
+
+
+def _validate_tool_params(body: dict[str, Any]) -> None:
+    tools = body.get("tools") or []
+    if not isinstance(tools, list) or not all(isinstance(t, dict) for t in tools):
+        raise HTTPException(status_code=400, detail="'tools' must be a list of tool definitions")
+    choice = body.get("tool_choice", "auto")
+    if choice == "required" and not tools:
+        raise HTTPException(status_code=400, detail="tool_choice requires an available function tool")
+    if isinstance(choice, dict):
+        function = choice.get("function")
+        name = function.get("name") if isinstance(function, dict) else None
+        if not name or not any(
+            t.get("type") == "function" and isinstance(t.get("function"), dict)
+            and t["function"].get("name") == name for t in tools
+        ):
+            raise HTTPException(status_code=400, detail="named tool_choice must match an available function tool")
+    if "parallel_tool_calls" in body and not isinstance(body["parallel_tool_calls"], bool):
+        raise HTTPException(status_code=400, detail="'parallel_tool_calls' must be a boolean")
 
 
 def merge_tool_calls(chunks: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
@@ -341,12 +366,15 @@ async def _collect(
     usage: dict[str, Any] | None = None
     served: str | None = None
     start = time.monotonic()
+    finish_reason = "stop"
     async for event in state.router.run(plan, messages, extra, conversation_id):
         if isinstance(event, RawChunk):
             data = event.data
             choices = data.get("choices")
             if isinstance(choices, list):
                 tool_chunks.append(data)
+                for choice in choices:
+                    finish_reason = choice.get("finish_reason") or finish_reason
             content_parts.extend(chunk_content(data))
             usage = chunk_usage(data) or usage
             served = data.get("model") or served
@@ -377,12 +405,14 @@ async def _collect(
     tool_calls = merge_tool_calls(tool_chunks)
     if tool_calls:
         message["tool_calls"] = tool_calls
+        if finish_reason == "stop":
+            finish_reason = "tool_calls"
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
         "object": "chat.completion",
         "created": now_ts(),
         "model": served or AUTO_MODEL,
-        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
         "usage": usage
         or {
             "prompt_tokens": None,
@@ -476,6 +506,7 @@ def create_app(
         model = str(body.get("model") or AUTO_MODEL)
         messages = body.get("messages")
         _validate_messages(messages)
+        _validate_tool_params(body)
         stream = bool(body.get("stream", False))
         extra = _extra_params(body)
         cfg = state.manager.get()
@@ -483,12 +514,26 @@ def create_app(
         if model != AUTO_MODEL and model not in cfg.models:
             raise HTTPException(status_code=404, detail=f"unknown model {model!r}")
 
-        last_user = _last_user_message(messages)
-        prompt = message_text(last_user.get("content"))
-
         conv_id = (request.headers.get(CONVERSATION_ID_HEADER) or "").strip() or None
         if conv_id is not None and len(conv_id) > 128:
             raise HTTPException(status_code=400, detail="conversation id too long")
+        if conv_id and messages[-1]["role"] == "tool":
+            history = await state.store.history(conv_id)
+            if not history:
+                raise HTTPException(status_code=400, detail="tool results need an existing conversation")
+            last_assistant = next((m for m in reversed(history) if m.role == "assistant"), None)
+            expected = {tc["id"] for tc in (last_assistant.tool_calls or [])} if last_assistant else set()
+            results = []
+            for msg in reversed(messages):
+                if msg["role"] != "tool":
+                    break
+                results.append(msg["tool_call_id"])
+            if not expected or len(results) != len(set(results)) or set(results) != expected:
+                raise HTTPException(status_code=400, detail="tool results must match the pending assistant tool calls")
+            prompt = next((m.content for m in reversed(history) if m.role == "user"), "")
+        else:
+            last_user = _last_user_message(messages)
+            prompt = message_text(last_user.get("content"))
 
         lock = state.conversation_lock(conv_id) if conv_id else None
         if lock is not None and lock.locked():
@@ -517,7 +562,28 @@ def create_app(
 
         async def _prep() -> tuple[RoutePlan, list[dict[str, Any]]]:
             await state.store.ensure_conversation(conv_id)
-            await state.store.append_message(conv_id, "user", prompt)
+            if messages[-1]["role"] == "tool":
+                # The proxy already stored the assistant's tool calls. Append
+                # only this batch of results, not the client's repeated history.
+                batch = []
+                for msg in reversed(messages):
+                    if msg["role"] != "tool":
+                        break
+                    batch.append(msg)
+                for msg in reversed(batch):
+                    await state.store.append_message(
+                        conv_id, "tool", message_text(msg.get("content")),
+                        tool_call_id=msg["tool_call_id"],
+                    )
+            else:
+                history = await state.store.history(conv_id)
+                if not history:
+                    for msg in messages:
+                        if msg["role"] in ("system", "developer"):
+                            await state.store.append_message(
+                                conv_id, msg["role"], message_text(msg.get("content"))
+                            )
+                await state.store.append_message(conv_id, "user", prompt)
             history = await state.store.history(conv_id)
             context = build_context(history, cfg.conversations.max_context_messages)
             plan = await state.router.plan(model, prompt, cfg)

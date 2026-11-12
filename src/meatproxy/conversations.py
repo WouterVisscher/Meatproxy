@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS messages (
     seq              INTEGER NOT NULL,
     role             TEXT NOT NULL,
     content          TEXT NOT NULL DEFAULT '',
-    tool_calls       TEXT
+    tool_calls       TEXT,
+    tool_call_id     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, seq);
 """
@@ -36,6 +37,7 @@ class StoredMessage:
     role: str
     content: str
     tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
 
 
 class ConversationStore:
@@ -48,6 +50,11 @@ class ConversationStore:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(_SCHEMA)
+        cursor = await self._db.execute("PRAGMA table_info(messages)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        await cursor.close()
+        if "tool_call_id" not in columns:
+            await self._db.execute("ALTER TABLE messages ADD COLUMN tool_call_id TEXT")
         await self._db.commit()
 
     async def aclose(self) -> None:
@@ -72,11 +79,12 @@ class ConversationStore:
         role: str,
         content: str,
         tool_calls: list[dict[str, Any]] | None = None,
+        tool_call_id: str | None = None,
     ) -> None:
         await self.db.execute(
-            "INSERT INTO messages(conversation_id, seq, role, content, tool_calls) "
-            "VALUES (?, (SELECT COUNT(*) FROM messages WHERE conversation_id = ?) + 1, ?, ?, ?)",
-            (conv_id, conv_id, role, content, json.dumps(tool_calls) if tool_calls else None),
+            "INSERT INTO messages(conversation_id, seq, role, content, tool_calls, tool_call_id) "
+            "VALUES (?, (SELECT COUNT(*) FROM messages WHERE conversation_id = ?) + 1, ?, ?, ?, ?)",
+            (conv_id, conv_id, role, content, json.dumps(tool_calls) if tool_calls else None, tool_call_id),
         )
         await self.db.execute(
             "UPDATE conversations SET last_active_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
@@ -87,7 +95,7 @@ class ConversationStore:
 
     async def history(self, conv_id: str) -> list[StoredMessage]:
         cursor = await self.db.execute(
-            "SELECT role, content, tool_calls FROM messages "
+            "SELECT role, content, tool_calls, tool_call_id FROM messages "
             "WHERE conversation_id = ? ORDER BY seq",
             (conv_id,),
         )
@@ -98,8 +106,9 @@ class ConversationStore:
                 role=role,
                 content=content,
                 tool_calls=json.loads(tc) if tc else None,
+                tool_call_id=tc_id,
             )
-            for role, content, tc in rows
+            for role, content, tc, tc_id in rows
         ]
 
     async def exists(self, conv_id: str) -> bool:
@@ -139,30 +148,32 @@ class ConversationStore:
 def build_context(history: list[StoredMessage], max_messages: int) -> list[dict[str, Any]]:
     """Assemble the message list for a stateless backend.
 
-    Keeps at most ``max_messages`` messages, always preserving any leading
-    system messages, and drops trailing tool-result-only gaps by trimming
-    from the front.
+    Keeps at most ``max_messages`` messages, preserving system/developer
+    messages and dropping tool results whose assistant call was trimmed.
     """
     system = [
         {"role": m.role, "content": m.content, **({"tool_calls": m.tool_calls} if m.tool_calls else {})}
         for m in history
-        if m.role == "system"
+        if m.role in ("system", "developer")
     ]
     rest = [
         {
             "role": m.role,
             "content": m.content,
             **({"tool_calls": m.tool_calls} if m.tool_calls else {}),
+            **({"tool_call_id": m.tool_call_id} if m.tool_call_id else {}),
         }
         for m in history
-        if m.role != "system"
+        if m.role not in ("system", "developer")
     ]
     budget = max(1, max_messages - len(system))
     rest = rest[-budget:]
-    # A leading "tool" message without its assistant tool_call is invalid;
-    # trim it.
-    while rest and rest[0]["role"] == "tool":
-        rest = rest[1:]
-    while rest and rest[-1]["role"] == "tool":
-        rest = rest[:-1]
-    return system + rest
+    # Keep results only when their assistant call survived trimming.
+    known_calls: set[str] = set()
+    valid = []
+    for msg in rest:
+        if msg["role"] == "tool" and msg.get("tool_call_id") not in known_calls:
+            continue
+        known_calls.update(tc.get("id") for tc in msg.get("tool_calls", []))
+        valid.append(msg)
+    return system + valid

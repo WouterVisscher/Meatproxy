@@ -3,7 +3,50 @@
 import logging
 import time
 
+import pytest
+
 from tests.conftest import auth, parse_sse
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_auto_openai_tool_calls_and_results(client, fakes, stream):
+    tools = [{"type": "function", "function": {"name": "echo", "parameters": {"type": "object"}}}]
+    call = {"id": "call-local", "type": "function", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}
+    fakes["npu"].tool_calls = [call]
+    messages = [{"role": "user", "content": "hi"}]
+    first = await client.post("/v1/chat/completions", headers=auth(), json={
+        "model": "auto", "messages": messages, "tools": tools,
+        "tool_choice": "required", "parallel_tool_calls": False, "stream": stream,
+    })
+    assert first.status_code == 200
+    if stream:
+        chunks = parse_sse(first.text)
+        assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
+        assert chunks[0]["choices"][0]["delta"]["tool_calls"][0]["id"] == "call-local"
+    else:
+        choice = first.json()["choices"][0]
+        assert choice["finish_reason"] == "tool_calls"
+        assert choice["message"]["tool_calls"] == [call]
+    upstream = fakes["npu"].requests[-1]
+    assert upstream["tools"] == tools
+    assert upstream["tool_choice"] == "required"
+    assert upstream["parallel_tool_calls"] is False
+    # Assistant tool calls may omit content, as OpenAI-compatible clients do.
+    messages += [{"role": "assistant", "tool_calls": [call]},
+                 {"role": "tool", "tool_call_id": "call-local", "content": "actual output"}]
+    result = await client.post("/v1/chat/completions", headers=auth(), json={
+        "model": "auto", "messages": messages, "tools": tools,
+    })
+    assert result.status_code == 200
+    assert fakes["npu"].requests[-1]["messages"] == messages
+    assert result.json()["choices"][0]["finish_reason"] == "stop"
+
+
+async def test_tool_result_requires_call_id(client):
+    result = await client.post("/v1/chat/completions", headers=auth(), json={
+        "messages": [{"role": "user", "content": "hi"}, {"role": "tool", "content": "result"}],
+    })
+    assert result.status_code == 400
 
 
 async def test_missing_auth_rejected(client):

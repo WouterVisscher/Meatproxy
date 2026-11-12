@@ -32,6 +32,7 @@ PASSTHROUGH_PARAMS = (
     "presence_penalty",
     "tools",
     "tool_choice",
+    "parallel_tool_calls",
     "response_format",
     "reasoning_effort",
 )

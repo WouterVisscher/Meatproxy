@@ -16,7 +16,7 @@ dependencies = [
     "PyYAML>=6.0",
     "prometheus-client>=0.20",
     "aiosqlite>=0.20",
-    "github-copilot-sdk>=1.0",
+    "github-copilot-sdk>=1.0.31",
 ]
 
 [project.optional-dependencies]

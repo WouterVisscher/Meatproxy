@@ -9,9 +9,9 @@ Copilot is an *agent runtime*, not a chat API, so this adapter:
   via ``resume_session`` — session state persists in ``base_directory``,
   which should be a durable volume.
 * maps stateless requests to ephemeral sessions (disconnected after the turn).
-* disables built-in tools (``available_tools=[]``): meatproxy is a proxy,
-  not an agent sandbox, so Copilot answers with text only and the
-  request's ``tools`` are deliberately dropped on this path.
+* disables built-in tools: meatproxy is a proxy, not an agent sandbox.
+  Tool-bearing requests use the terminal-tool bridge in ``copilot_tools``;
+  the client, never this process, executes those tools.
 
 Model selection uses Copilot's own "auto" mode by default
 (``model="auto"``), optionally nudged with an auto tier preference.
