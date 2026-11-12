@@ -7,7 +7,10 @@ import pytest
 
 from meatproxy.config import TriageSpec
 from meatproxy.openai_client import OpenAIBackend
-from meatproxy.triage import Triage, TriageUnavailable, _parse_tier
+from meatproxy.triage import (
+    LEGACY_REASON, TRIAGE_MAX_TOKENS, Triage, TriageUnavailable,
+    _parse_decision, _parse_tier,
+)
 
 
 def _backend(responses: list[str], calls: list) -> OpenAIBackend:
@@ -15,7 +18,7 @@ def _backend(responses: list[str], calls: list) -> OpenAIBackend:
 
     def handler(request: httpx.Request):
         body = json.loads(request.content)
-        assert body["max_tokens"] == 8
+        assert body["max_tokens"] == TRIAGE_MAX_TOKENS
         calls.append(body)
         answer = responses[min(n["i"], len(responses) - 1)]
         n["i"] += 1
@@ -62,6 +65,40 @@ async def test_classify_and_cache():
     assert first.tier == "light" and first.cached is False
     assert second.cached is True
     assert len(calls) == 1  # cache hit, no second upstream call
+
+
+async def test_summary_is_cached():
+    calls: list = []
+    triage = _triage(_backend(["light | Routine low-complexity operation."], calls))
+    first = await triage.classify("commit it")
+    second = await triage.classify("commit it")
+    assert first.reason == "Routine low-complexity operation."
+    assert second.reason == first.reason
+    assert second.cached is True
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("answer, tier, reason", [
+    ("light | Simple task.", "light", "Simple task."),
+    ("medium | Bounded task.", "mid", "Bounded task."),
+    ("heavy", "heavy", LEGACY_REASON),
+    ("light |   ", "light", LEGACY_REASON),
+    ("unknown | heavy work", None, "heavy work"),
+    ("mid | Multi-line\n summary.", "mid", "Multi-line summary."),
+])
+def test_parse_decision(answer, tier, reason):
+    assert _parse_decision(answer) == (tier, reason)
+
+
+def test_summary_length_is_bounded():
+    tier, reason = _parse_decision("light | " + "x" * 500)
+    assert tier == "light"
+    assert len(reason) == 240
+
+
+async def test_legacy_summary():
+    triage = _triage(_backend(["light"], []))
+    assert (await triage.classify("hi")).reason == LEGACY_REASON
 
 
 async def test_classify_different_prompts_not_cached():

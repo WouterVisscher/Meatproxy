@@ -87,6 +87,8 @@ async def test_triage_debug_decision(tmp_path, fakes, caplog, prompt, tier, mode
         assert record.kv["chain"][0] == model
         assert record.kv["source"] == "auto"
         assert record.kv["cached"] is cached
+        assert record.kv["reason"]
+        assert "configured chain" in record.kv["routing_reason"]
         assert record.kv["latency_ms"] >= 0
         assert prompt not in str(record.kv)
 

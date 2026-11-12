@@ -1,22 +1,14 @@
-"""Triage: a small local model classifies the incoming prompt.
-
-The decision is one of the configured tiers (light / mid / heavy) and is
-cached by prompt hash. When triage is unavailable or too slow, requests go
-straight to the configured ``on_failure`` model.
-"""
+"""Triage: classify prompts into tiers, caching a brief decision summary."""
 
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .config import TIER_ORDER, TriageSpec
 from .openai_client import OpenAIBackend
-
-log = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM = (
     "You are a routing classifier for an LLM gateway. Decide which tier of "
@@ -27,8 +19,14 @@ DEFAULT_SYSTEM = (
     "a concept, multi-step but bounded tasks).\n"
     "- heavy: complex or high-stakes work (architecture decisions, large "
     "multi-file changes, deep debugging, long reasoning, sensitive decisions).\n"
-    "Reply with exactly one word: light, mid or heavy. No other text."
+    "Reply on one line: <tier> | <brief decision summary>. "
+    "Start with light, mid or heavy, then a pipe and a short explanation of "
+    "the task complexity (at most 20 words). Do not provide step-by-step "
+    "reasoning or quote user content, secrets, or code."
 )
+
+TRIAGE_MAX_TOKENS = 96
+LEGACY_REASON = "Classifier returned a tier without a decision summary."
 
 
 class TriageUnavailable(Exception):
@@ -39,14 +37,16 @@ class TriageUnavailable(Exception):
 class TriageDecision:
     tier: str
     cached: bool = False
+    # Model-generated diagnostic summary, not internal reasoning.
+    reason: str = LEGACY_REASON
 
 
 @dataclass
 class Triage:
     spec: TriageSpec
-    backend: OpenAIBackend  # backend serving the triage model
+    backend: OpenAIBackend
     upstream_model: str
-    _cache: dict[str, tuple[str, float]] = field(default_factory=dict)
+    _cache: dict[str, tuple[TriageDecision, float]] = field(default_factory=dict)
     _cache_max: int = 1024
 
     def _key(self, text: str) -> str:
@@ -59,17 +59,17 @@ class Triage:
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached and now - cached[1] < self.spec.cache_ttl_s:
-            return TriageDecision(tier=cached[0], cached=True)
+            return replace(cached[0], cached=True)
 
-        tier = await self._classify_once(user_text)
-        self._cache[key] = (tier, now)
+        decision = await self._classify_once(user_text)
+        self._cache[key] = (decision, now)
         if len(self._cache) > self._cache_max:
-            oldest = sorted(self._cache.items(), key=lambda kv: kv[1])[:100]
+            oldest = sorted(self._cache.items(), key=lambda kv: kv[1][1])[:100]
             for k, _ in oldest:
                 self._cache.pop(k, None)
-        return TriageDecision(tier=tier, cached=False)
+        return decision
 
-    async def _classify_once(self, text: str) -> str:
+    async def _classify_once(self, text: str) -> TriageDecision:
         system = self.spec.prompt or DEFAULT_SYSTEM
         messages = [
             {"role": "system", "content": system},
@@ -79,14 +79,22 @@ class Triage:
             answer = await self.backend.complete(
                 self.upstream_model,
                 messages,
-                extra={"max_tokens": 8, "temperature": 0.0},
+                extra={"max_tokens": TRIAGE_MAX_TOKENS, "temperature": 0.0},
             )
         except Exception as e:
             raise TriageUnavailable(str(e)) from e
-        tier = _parse_tier(answer)
+        tier, reason = _parse_decision(answer)
         if tier is None:
-            raise TriageUnavailable(f"unparsable triage answer: {answer!r}")
-        return tier
+            raise TriageUnavailable("unparsable triage answer")
+        return TriageDecision(tier=tier, reason=reason)
+
+
+def _parse_decision(answer: str) -> tuple[str | None, str]:
+    """Accept tier-first summaries and legacy tier-only classifier prompts."""
+    label, separator, summary = answer.strip().partition("|")
+    tier = _parse_tier(label)
+    reason = " ".join(summary.split())[:240] if separator else ""
+    return tier, reason or LEGACY_REASON
 
 
 def _parse_tier(answer: str) -> str | None:

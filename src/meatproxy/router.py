@@ -91,6 +91,7 @@ class Router:
                         "chain": [m.name for m in plan.models],
                         "source": plan.source,
                         "error_type": type(e).__name__,
+                        "routing_reason": "Classifier failed or timed out; using the configured fallback model.",
                         "latency_ms": round(elapsed * 1000, 3),
                     }},
                 )
@@ -119,6 +120,12 @@ class Router:
                     "chain": [m.name for m in plan.models],
                     "source": plan.source,
                     "cached": decision.cached,
+                    "reason": decision.reason,
+                    "routing_reason": (
+                        "Selected the first model in the chosen tier's configured chain."
+                        if models else
+                        "Chosen tier has no chain; using the configured fallback model."
+                    ),
                     "latency_ms": round(elapsed * 1000, 3),
                 }},
             )

@@ -210,7 +210,7 @@ async def test_conversation_flow(client, fakes):
         parse_sse(r.text)
 
     # the router rebuilt history: 2nd call sent 3 messages (u0, a0, u1)
-    chat_calls = [b for b in fakes["npu"].requests if b.get("max_tokens") != 8]
+    chat_calls = [b for b in fakes["npu"].requests if b.get("max_tokens") != 96]
     assert [len(b["messages"]) for b in chat_calls] == [1, 3]
 
     listing = await client.get("/v1/conversations", headers=auth())

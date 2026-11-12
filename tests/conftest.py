@@ -17,7 +17,7 @@ API_KEY = "test-key"
 class FakeUpstream:
     """Stateful fake OpenAI upstream.
 
-    * triage calls (max_tokens == 8) answer "heavy" when the last message
+    * triage calls (max_tokens == 96) answer "heavy" when the last message
       contains a configured trigger word, else "light";
     * stream calls yield two content chunks + usage + [DONE];
     * when ``fail`` is True, chat calls answer 503;
@@ -43,7 +43,7 @@ class FakeUpstream:
         body = json.loads(request.content)
         self.requests.append(body)
 
-        if body.get("max_tokens") == 8 and body["model"] == (self.triage_model or ""):
+        if body.get("max_tokens") == 96 and body["model"] == (self.triage_model or ""):
             if self.triage_delay:
                 import asyncio
 
