@@ -79,7 +79,8 @@ timeout_s = 60
 ```
 
 The config file is **hot-reloaded** when its mtime changes; an invalid new
-file is rejected and the old config stays active.
+file is rejected (logged once per file version) and the old config keeps
+serving.
 
 ## API
 

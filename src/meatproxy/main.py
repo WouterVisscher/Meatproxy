@@ -90,6 +90,7 @@ class AppState:
         )
         self._locks: dict[str, asyncio.Lock] = {}
         self._reload_lock = asyncio.Lock()
+        self._rejected_mtime: float | None = None
         self._apply_config(cfg)
 
     def _apply_config(self, cfg: Config) -> None:
@@ -101,15 +102,36 @@ class AppState:
         return self._locks.setdefault(conv_id, asyncio.Lock())
 
     async def refresh(self) -> None:
-        """Hot-reload the config file if it changed."""
+        """Hot-reload the config file if it changed.
+
+        An invalid new file is rejected: the previous config keeps serving
+        and the rejection is logged once per file version.
+        """
         async with self._reload_lock:
-            if not self.manager.refresh():
+            try:
+                changed = self.manager.refresh()
+            except ConfigError as e:
+                try:
+                    bad_mtime = self.manager.path.stat().st_mtime
+                except OSError:
+                    bad_mtime = None
+                if bad_mtime != self._rejected_mtime:
+                    self._rejected_mtime = bad_mtime
+                    emit(
+                        log,
+                        logging.WARNING,
+                        "config reload rejected, keeping previous config",
+                        error=str(e),
+                    )
+                return
+            if not changed:
                 return
             cfg = self.manager.get()
             old_registry = self.pool.current
             await self.pool.rebuild(cfg)
             self._apply_config(cfg)
             await old_registry.aclose_all()
+            self._rejected_mtime = None
             emit(log, logging.INFO, "config reloaded", models=sorted(cfg.models))
 
 

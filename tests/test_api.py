@@ -1,5 +1,8 @@
 """End-to-end API tests against the app with fake upstreams."""
 
+import logging
+import time
+
 from tests.conftest import auth, parse_sse
 
 
@@ -198,6 +201,40 @@ async def test_metrics_endpoint(client):
     r = await client.get("/metrics")
     assert r.status_code == 200
     assert "meatproxy_requests_total" in r.text
+
+
+async def test_invalid_config_reload_keeps_serving(client, config_path, caplog):
+    """An invalid config file must not take the API down: the old config
+    keeps serving, and the rejection is logged once per file version."""
+    r = await client.post(
+        "/v1/chat/completions",
+        headers=auth(),
+        json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+
+    config_path.write_text("models: [not a mapping")
+    time.sleep(0.05)  # ensure mtime differs
+
+    with caplog.at_level(logging.WARNING, logger="meatproxy.main"):
+        r = await client.post(
+            "/v1/chat/completions",
+            headers=auth(),
+            json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert r.status_code == 200
+        assert r.json()["object"] == "chat.completion"
+        # second request: still serving, no duplicate warning
+        r = await client.post(
+            "/v1/chat/completions",
+            headers=auth(),
+            json={"model": "auto", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert r.status_code == 200
+    warnings = [
+        rec for rec in caplog.records if "config reload rejected" in rec.getMessage()
+    ]
+    assert len(warnings) == 1
 
 
 async def test_no_user_message_400(client):
