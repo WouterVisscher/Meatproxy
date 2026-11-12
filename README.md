@@ -157,33 +157,40 @@ See `config/example.npu-only.yaml`, `config/example.npu-gpu.yaml` and
 stored in the file:
 
 ```yaml
-[models]
-npu-small = { tier = "light", endpoint = "http://npu-host:11434/v1", model = "fastflow-small" }
-onprem-vllm = { tier = "mid", endpoint = "http://gpu-box:8000/v1", model = "qwen2.5-coder-32b",
-                api_key_env = "ONPREM_API_KEY" }        # optional, per model
-copilot = { tier = "heavy", kind = "copilot" }
+models:
+  npu-small:
+    tier: light
+    endpoint: http://npu-host:11434/v1
+    model: fastflow-small
+  onprem-vllm:
+    tier: mid
+    endpoint: http://gpu-box:8000/v1
+    model: qwen2.5-coder-32b
+    api_key_env: ONPREM_API_KEY   # optional, per model
+  copilot:
+    tier: heavy
+    kind: copilot
 
-[routing]
-  [routing.triage]
-  model = "npu-small"     # the model that classifies
-  timeout_s = 2           # budget; on failure → on_failure
-  on_failure = "copilot"
-  cache_ttl_s = 300
+routing:
+  triage:
+    model: npu-small              # the model that classifies
+    timeout_s: 2                  # budget; on failure → on_failure
+    on_failure: copilot
+    cache_ttl_s: 300
+  chains:                         # fallback order per triage tier (escalates up)
+    light: [npu-small, onprem-vllm, copilot]
+    mid: [onprem-vllm, copilot]
+    heavy: [copilot, onprem-vllm]
 
-  [routing.chains]        # fallback order per triage tier (escalates up)
-  light = ["npu-small", "onprem-vllm", "copilot"]
-  mid = ["onprem-vllm", "copilot"]
-  heavy = ["copilot", "onprem-vllm"]
+conversations:
+  db_path: /data/meatproxy.db
+  max_context_messages: 40
+  copilot_idle_timeout_s: 900
 
-[conversations]
-db_path = "/data/meatproxy.db"
-max_context_messages = 40
-copilot_idle_timeout_s = 900
-
-[copilot]
-base_directory = "/data/copilot"   # where Copilot session state + login live
-auto_tier = ""                     # optional: efficiency | balance | intelligence | fast
-timeout_s = 60
+copilot:
+  base_directory: /data/copilot   # where Copilot session state + login live
+  auto_tier: ""                   # optional: efficiency | balance | intelligence | fast
+  timeout_s: 60
 ```
 
 The config file is **hot-reloaded** when its mtime changes; an invalid new
@@ -254,8 +261,8 @@ docker run -it --rm <image> copilot login --yes
 ```
 
 The token alternative for the server remains: set an env var with a
-GitHub token and point `[copilot] token_env` at it, e.g.
-`token_env = "COPILOT_GITHUB_TOKEN"`.
+GitHub token and point `copilot: token_env` at it, e.g.
+`token_env: COPILOT_GITHUB_TOKEN`.
 
 The Copilot CLI runtime is downloaded at image build time
 (`python -m copilot download-runtime`), so the image is self-contained.
