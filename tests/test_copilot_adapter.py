@@ -6,6 +6,8 @@ Copilot runtime or subscription is needed.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 import meatproxy.copilot_adapter as ca
@@ -94,8 +96,10 @@ class FakeClient:
         raise RuntimeError("no persisted session")
 
 
-def _install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
-    client = FakeClient()
+def _install_fake_sdk(
+    monkeypatch: pytest.MonkeyPatch, client: FakeClient | None = None
+) -> FakeClient:
+    client = client or FakeClient()
     monkeypatch.setattr(
         ca,
         "_copilot",
@@ -161,3 +165,37 @@ async def test_pooled_session_reused_across_turns(monkeypatch):
     assert len(client.created) == 1  # second turn reused the pooled session
     assert conversations_active._value.get() == 1
     await adapter.stop()
+
+
+class LateIdleSession(FakeSession):
+    """The real runtime's interleaving: the delta is delivered before the
+    idle event, so by the time the turn ends the consumer has already
+    consumed the delta and is blocked on the next queue.get()."""
+
+    async def send(self, prompt: str) -> str:
+        for handler in list(self._handlers):
+            handler(FakeEvent(FakeDeltaData("hi")))
+        await asyncio.sleep(0)  # let the consumer consume the delta and block
+        for handler in list(self._handlers):
+            handler(FakeEvent(FakeIdleData()))
+        return "req-1"
+
+
+class LateIdleClient(FakeClient):
+    async def create_session(self, session_id=None, **kwargs) -> LateIdleSession:
+        session = LateIdleSession()
+        self.created.append(session)
+        return session
+
+
+async def test_turn_end_wakes_blocked_consumer(monkeypatch):
+    """End-of-turn events enqueue nothing; without the _TURN_DONE sentinel
+    the consumer stayed blocked on queue.get() and the stream stalled until
+    the 600s timeout (observed against the live runtime)."""
+    client = _install_fake_sdk(monkeypatch, LateIdleClient())
+    adapter = ca.CopilotAdapter(CopilotSpec())
+
+    events = [ev async for ev in adapter.stream("hi")]
+
+    assert "".join(ev.text for ev in events) == "hi"
+    assert client.created[0].disconnected is True

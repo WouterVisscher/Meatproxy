@@ -41,9 +41,11 @@ tokens present — regardless of `finish_reason`.
 
 - Copilot sign-in works end-to-end (`meatproxy copilot login`,
   device-code flow; credentials land in the copilot home the server
-  uses). Live test of the Copilot adapter — requests through a running
-  proxy — still pending (needs a GitHub Copilot subscription; runtime
-  is already baked into the Docker image).
+  uses). Live test of the Copilot adapter through a running proxy is
+  done (2026-11-12): non-streaming, streaming and multi-turn
+  conversation requests all route to Copilot correctly; found and
+  fixed a stream stall where end-of-turn events never woke a consumer
+  blocked on the event queue.
 - `copilot login --token`: verify which token kinds the runtime accepts
   (classic PATs unverified).
 - Verify session resume across evictions/restarts on the real runtime.

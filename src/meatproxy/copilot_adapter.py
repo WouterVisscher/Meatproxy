@@ -83,6 +83,13 @@ class _PooledSession:
     last_active: float
 
 
+# Queued when a turn ends without a content event (session idle / autopilot
+# stopped): the end-of-turn events only set `done` and enqueue nothing, so a
+# consumer blocked on queue.get() after the last delta would never wake up
+# and the stream would stall until the 600s timeout.
+_TURN_DONE = object()
+
+
 class CopilotAdapter:
     """Drives Copilot sessions behind a simple text-stream interface."""
 
@@ -273,10 +280,12 @@ class CopilotAdapter:
                 done.set()
             elif isinstance(data, sdk["SessionIdleData"]) and data.mode != sdk["SessionMode"].AUTOPILOT:
                 done.set()
+                queue.put_nowait(_TURN_DONE)
             elif isinstance(data, sdk["SessionAutopilotStoppedData"]):
                 # Only settle on our own request's stop event.
                 if sent.get("id") is None or getattr(data, "request_id", None) == sent["id"]:
                     done.set()
+                    queue.put_nowait(_TURN_DONE)
 
         unsubscribe = session.on(on_event)
         try:
@@ -297,17 +306,22 @@ class CopilotAdapter:
                     raise FirstChunkTimeout(f"no copilot response within {timeout}s") from e
                 if isinstance(first, Exception):
                     raise first
-                yield first
-                while True:
-                    try:
-                        item = await asyncio.wait_for(queue.get(), timeout=600)
-                    except asyncio.TimeoutError:
-                        raise UpstreamError("copilot stream stalled (600s)") from None
-                    if isinstance(item, Exception):
-                        raise item
-                    yield item
-                    if done.is_set() and queue.empty():
-                        break
+                if first is not _TURN_DONE:
+                    # the turn may end (sentinel) before any delta arrives;
+                    # the final-content fallback below still covers that
+                    yield first
+                    while True:
+                        try:
+                            item = await asyncio.wait_for(queue.get(), timeout=600)
+                        except asyncio.TimeoutError:
+                            raise UpstreamError("copilot stream stalled (600s)") from None
+                        if item is _TURN_DONE:
+                            break
+                        if isinstance(item, Exception):
+                            raise item
+                        yield item
+                        if done.is_set() and queue.empty():
+                            break
                 if not state["delta"] and state["final"]:
                     # No deltas streamed (should be rare); emit the whole
                     # final content so the client still gets an answer.
