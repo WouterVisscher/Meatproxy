@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
 from .config import CopilotSpec
+from .metrics import conversations_active
 from .openai_client import FirstChunkTimeout, StreamEvent, TextDelta, UpstreamError
 
 log = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ class CopilotAdapter:
                 with contextlib.suppress(Exception):
                     await entry.session.disconnect()
             self._sessions.clear()
+            self._sync_gauge()
             with contextlib.suppress(Exception):
                 await self._client.stop()
             self._client = None
@@ -149,17 +151,24 @@ class CopilotAdapter:
     def active_sessions(self) -> int:
         return len(self._sessions)
 
+    def _sync_gauge(self) -> None:
+        conversations_active.set(len(self._sessions))
+
     async def _evict_idle(self) -> None:
         while True:
             await asyncio.sleep(30)
             now = asyncio.get_event_loop().time()
             cutoff = self._idle_timeout
+            evicted = False
             for conv_id, entry in list(self._sessions.items()):
                 if now - entry.last_active > cutoff:
                     self._sessions.pop(conv_id, None)
                     with contextlib.suppress(Exception):
                         await entry.session.disconnect()
                     log.info("evicted idle copilot session %s", conv_id)
+                    evicted = True
+            if evicted:
+                self._sync_gauge()
 
     def set_idle_timeout(self, seconds: float) -> None:
         self._idle_timeout = seconds
@@ -186,6 +195,7 @@ class CopilotAdapter:
                     conversation_id, model=model, capi=self._capi(), **common
                 )
                 self._sessions[conversation_id] = _PooledSession(session, now)
+                self._sync_gauge()
                 return session, False
             except Exception:
                 pass  # fall through to a fresh session with the same id
@@ -198,6 +208,7 @@ class CopilotAdapter:
         )
         if conversation_id:
             self._sessions[conversation_id] = _PooledSession(session, now)
+            self._sync_gauge()
         return session, True
 
     def _capi(self) -> dict | None:
