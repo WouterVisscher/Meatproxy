@@ -124,6 +124,38 @@ async def test_auto_plan_heavy(tmp_path, fakes):
     assert plan.tier == "heavy"
 
 
+async def test_tool_bearing_bumps_light_to_mid(tmp_path, fakes):
+    router, cfg, _ = make_router(tmp_path, fakes)
+    plan = await router.plan("auto", "hello", cfg, tool_bearing=True)
+    assert plan.source == "auto"
+    assert plan.tier == "mid"
+    assert [m.name for m in plan.models] == ["onprem"]
+
+
+async def test_tool_bearing_keeps_higher_tiers(tmp_path, fakes):
+    router, cfg, _ = make_router(tmp_path, fakes)
+    plan = await router.plan(
+        "auto", "please refactor the whole architecture", cfg, tool_bearing=True
+    )
+    assert plan.tier == "heavy"
+
+
+async def test_tool_bearing_without_mid_chain_stays_light(tmp_path, fakes):
+    content = TEST_CONFIG.replace("    mid: [onprem]\n", "")
+    router, cfg, _ = make_router(tmp_path, fakes, content=content)
+    plan = await router.plan("auto", "hello", cfg, tool_bearing=True)
+    assert plan.tier == "light"
+    assert [m.name for m in plan.models] == ["npu-small", "onprem"]
+
+
+async def test_direct_plan_ignores_tool_bearing(tmp_path, fakes):
+    router, cfg, _ = make_router(tmp_path, fakes)
+    plan = await router.plan("npu-small", "hi", cfg, tool_bearing=True)
+    assert plan.source == "direct"
+    assert plan.tier == "light"
+    assert [m.name for m in plan.models] == ["npu-small", "onprem"]
+
+
 async def test_triage_failure_routes_to_on_failure(tmp_path, fakes):
     fakes["npu"].fail = True  # triage upstream is down
     router, cfg, _ = make_router(tmp_path, fakes)

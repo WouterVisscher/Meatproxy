@@ -57,7 +57,9 @@ class Router:
 
     # -- planning ------------------------------------------------------------
 
-    async def plan(self, requested_model: str, prompt: str, cfg: Config) -> RoutePlan:
+    async def plan(
+        self, requested_model: str, prompt: str, cfg: Config, tool_bearing: bool = False
+    ) -> RoutePlan:
         if requested_model != AUTO_MODEL:
             return RoutePlan(
                 tier=cfg.model(requested_model).tier,
@@ -95,7 +97,7 @@ class Router:
                         "latency_ms": round(elapsed * 1000, 3),
                     }},
                 )
-                return plan
+                return self._raise_for_tool_bearing(plan, cfg, tool_bearing)
             elapsed = time.monotonic() - started
             triage_latency_seconds.observe(elapsed)
             triage_decisions_total.labels(tier=decision.tier, cached=str(decision.cached)).inc()
@@ -129,13 +131,43 @@ class Router:
                     "latency_ms": round(elapsed * 1000, 3),
                 }},
             )
-            return plan
+            return self._raise_for_tool_bearing(plan, cfg, tool_bearing)
 
         # triage disabled: go to the highest tier that has a chain
         for tier in AUTO_TIER_FALLBACKS:
             if cfg.chains.get(tier):
-                return RoutePlan(tier=tier, models=cfg.chain_for(tier), source="auto-default")
+                plan = RoutePlan(tier=tier, models=cfg.chain_for(tier), source="auto-default")
+                return self._raise_for_tool_bearing(plan, cfg, tool_bearing)
         raise ConfigError("no routing chains configured")
+
+    def _raise_for_tool_bearing(self, plan: RoutePlan, cfg: Config, tool_bearing: bool) -> RoutePlan:
+        """Raise tool-bearing "auto" plans from light to at least mid.
+
+        Small local NPU models cannot be trusted to emit structured
+        tool_calls: at 7B they answer with JSON embedded in the text
+        content (or empty arguments), which clients cannot execute.
+
+        TODO: this tier raise is a heuristic -- re-think it. Better: give
+        models an explicit ``tool_calls`` capability in the config and
+        have the router skip models that cannot be trusted per request,
+        regardless of tier (see TODO.md).
+        """
+        if not tool_bearing or plan.tier != "light":
+            return plan
+        models = cfg.chain_for("mid")
+        if not models:
+            return plan
+        log.info(
+            "tool-bearing request; raising tier %s -> %s",
+            plan.tier, "mid",
+            extra={"kv": {
+                "from_tier": plan.tier,
+                "tier": "mid",
+                "chain": [m.name for m in models],
+                "source": plan.source,
+            }},
+        )
+        return RoutePlan(tier="mid", models=models, source=plan.source)
 
     def _fallback_plan(
         self, cfg: Config, spec: TriageSpec, reason: str, source: str

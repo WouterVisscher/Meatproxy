@@ -38,6 +38,21 @@ log = logging.getLogger(__name__)
 _copilot = None
 
 
+async def _gh_auth_token() -> str | None:
+    """Token from the GitHub CLI (`gh auth token`), or None if unavailable."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh", "auth", "token",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    token = out.decode().strip()
+    return token if proc.returncode == 0 and token else None
+
+
 def _sdk():
     global _copilot
     if _copilot is None:
@@ -132,13 +147,15 @@ class CopilotAdapter:
             sdk = _sdk()
             kwargs: dict[str, Any] = {
                 "log_level": "info",
-                "env": {"COPILOT_TELEMETRY_DISABLED": "true"},
+                "env": {**os.environ, "COPILOT_TELEMETRY_DISABLED": "true"},
             }
             if self.spec.base_directory:
                 kwargs["base_directory"] = self.spec.base_directory
             token = None
             if self.spec.token_env:
                 token = os.environ.get(self.spec.token_env)
+            if not token:
+                token = await _gh_auth_token()
             if token:
                 kwargs["github_token"] = token
             else:

@@ -36,6 +36,7 @@ from .backends import BackendPool, TransportFactory, build_registry
 from .config import Config, ConfigError, ConfigManager
 from .conversations import ConversationStore, build_context
 from .copilot_adapter import CopilotAdapter
+from .copilot_tools import has_tool_history
 from .logsetup import emit, setup_logging
 from .metrics import (
     conversations_active,
@@ -174,6 +175,24 @@ def _last_user_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _extra_params(body: dict[str, Any]) -> dict[str, Any]:
     return {k: body[k] for k in PASSTHROUGH_PARAMS if k in body}
+
+
+def _request_tool_bearing(extra: dict[str, Any], messages: list[dict[str, Any]]) -> bool:
+    """True when the request needs tool calling: it carries tool
+    definitions, picks a tool, or continues a tool call (tool-role
+    results or assistant tool_calls in the transcript). The router
+    routes such requests to at least the mid tier (see
+    Router._raise_for_tool_bearing)."""
+    return bool(extra.get("tools")) or "tool_choice" in extra or has_tool_history(messages)
+
+
+def _normalize_messages(messages: list[dict[str, Any]]) -> None:
+    # Some upstreams (e.g. Lemonade/NPU) reject the OpenAI-standard
+    # {"content": null, "tool_calls": [...]} assistant messages; "" is
+    # equivalent and universally accepted.
+    for msg in messages:
+        if msg.get("content") is None:
+            msg["content"] = ""
 
 
 def _validate_messages(messages: Any) -> None:
@@ -506,6 +525,7 @@ def create_app(
         model = str(body.get("model") or AUTO_MODEL)
         messages = body.get("messages")
         _validate_messages(messages)
+        _normalize_messages(messages)
         _validate_tool_params(body)
         stream = bool(body.get("stream", False))
         extra = _extra_params(body)
@@ -543,7 +563,9 @@ def create_app(
             )
 
         if conv_id is None:
-            plan = await state.router.plan(model, prompt, cfg)
+            plan = await state.router.plan(
+                model, prompt, cfg, tool_bearing=_request_tool_bearing(extra, messages)
+            )
             if stream:
                 return StreamingResponse(
                     _run_and_stream(state, plan, messages, extra, None),
@@ -586,7 +608,9 @@ def create_app(
                 await state.store.append_message(conv_id, "user", prompt)
             history = await state.store.history(conv_id)
             context = build_context(history, cfg.conversations.max_context_messages)
-            plan = await state.router.plan(model, prompt, cfg)
+            plan = await state.router.plan(
+                model, prompt, cfg, tool_bearing=_request_tool_bearing(extra, messages)
+            )
             return plan, context
 
         if stream:

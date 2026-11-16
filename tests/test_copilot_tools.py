@@ -246,10 +246,11 @@ async def test_system_instructions_not_demoted_to_user_transcript(tool_client):
 
 
 async def test_local_failover_reaches_copilot_with_tools(client, config_path, fakes, tool_client):
+    # Tool-bearing auto requests are raised to the mid tier, so the
+    # failover path is the mid chain, not the light one.
     config_path.write_text(config_path.read_text().replace(
-        "light: [npu-small, onprem]", "light: [npu-small, onprem, copilot]"
+        "mid: [onprem]", "mid: [onprem, copilot]"
     ))
-    fakes["npu"].fail_models.add("fastflow-small")
     fakes["gpu"].fail = True
     result = await client.post("/v1/chat/completions", headers=auth(), json={
         "model": "auto", "messages": [{"role": "user", "content": "use bash"}], "tools": TOOLS,

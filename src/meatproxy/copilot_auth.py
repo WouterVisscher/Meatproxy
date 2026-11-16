@@ -14,6 +14,7 @@ a clear error instead of an import traceback.
 from __future__ import annotations
 
 import contextlib
+import os
 import webbrowser
 from contextlib import asynccontextmanager
 from typing import Any, Callable
@@ -85,7 +86,9 @@ def client_kwargs(base_directory: str | None) -> dict[str, Any]:
     credentials land where the running proxy expects them."""
     kwargs: dict[str, Any] = {
         "log_level": "info",
-        "env": {"COPILOT_TELEMETRY_DISABLED": "true"},
+        # a custom env replaces the inherited one, so keep it (the runtime needs
+        # DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR to reach the OS keychain)
+        "env": {**os.environ, "COPILOT_TELEMETRY_DISABLED": "true"},
         # logged-in-user credentials; the client starts fine while logged out
         "use_logged_in_user": True,
     }
@@ -149,6 +152,10 @@ def _out(line: str) -> None:
     print(line, flush=True)
 
 
+# the runtime's consent token (found in its binary; not in the API docs)
+_CONSENT_ALLOW = "allow"
+
+
 def _consent_decision(assume_yes: bool, ask: Callable[[str], str], tries: int) -> str:
     """The plaintext-consent answer to send via advance(input=...).
 
@@ -159,9 +166,9 @@ def _consent_decision(assume_yes: bool, ask: Callable[[str], str], tries: int) -
     """
     if assume_yes:
         if tries == 0:
-            return "yes"
+            return _CONSENT_ALLOW
         if tries == 1:
-            return "y"
+            return "yes"
         raise CopilotAuthError(
             "the runtime did not accept the plaintext-storage consent; "
             "re-run without --yes to answer interactively"
@@ -171,7 +178,8 @@ def _consent_decision(assume_yes: bool, ask: Callable[[str], str], tries: int) -
             "the runtime did not accept the plaintext-storage consent answer; "
             "re-run 'meatproxy copilot login' and try again"
         )
-    return ask("Store the auth token in plaintext (no keychain in this environment)? [y/N] ")
+    answer = ask("Store the auth token in plaintext (no keychain in this environment)? [y/N] ")
+    return _CONSENT_ALLOW if answer.strip().lower() in ("y", "yes") else "deny"
 
 
 def _pick_account(

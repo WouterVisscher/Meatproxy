@@ -48,6 +48,20 @@ tokens present — regardless of `finish_reason`.
   7B ignored the task (answered the example instead of the tier word);
   with the full prompt it was 6/6 accurate.
 
+## Routing: tool-bearing requests
+
+- Heuristic (2026-11-16): tool-bearing `auto` requests (request carries
+  `tools` / `tool_choice`, or the transcript has tool history) are
+  raised from the light tier to at least `mid`
+  (`Router._raise_for_tool_bearing`). Reason: the NPU 7B
+  Qwen2.5-Coder does not emit structured tool_calls reliably — it
+  embeds the JSON in the text content (or returns empty arguments),
+  which clients cannot execute; the "commit the latest changes"
+  repro landed on the NPU and returned prose instead of a tool call.
+- TODO (re-think): replace the tier raise with an explicit
+  `tool_calls` capability flag per model in the config, so the router
+  skips models that cannot be trusted per request, regardless of tier.
+
 ## Copilot
 
 - Copilot sign-in works end-to-end (`meatproxy copilot login`,

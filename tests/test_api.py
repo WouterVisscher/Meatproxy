@@ -10,9 +10,11 @@ from tests.conftest import auth, parse_sse
 
 @pytest.mark.parametrize("stream", [False, True])
 async def test_auto_openai_tool_calls_and_results(client, fakes, stream):
+    # Tool-bearing auto requests are raised from light to the mid tier, so
+    # the on-prem (gpu) upstream serves them, not the NPU.
     tools = [{"type": "function", "function": {"name": "echo", "parameters": {"type": "object"}}}]
     call = {"id": "call-local", "type": "function", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}
-    fakes["npu"].tool_calls = [call]
+    fakes["gpu"].tool_calls = [call]
     messages = [{"role": "user", "content": "hi"}]
     first = await client.post("/v1/chat/completions", headers=auth(), json={
         "model": "auto", "messages": messages, "tools": tools,
@@ -27,18 +29,24 @@ async def test_auto_openai_tool_calls_and_results(client, fakes, stream):
         choice = first.json()["choices"][0]
         assert choice["finish_reason"] == "tool_calls"
         assert choice["message"]["tool_calls"] == [call]
-    upstream = fakes["npu"].requests[-1]
+    upstream = fakes["gpu"].requests[-1]
     assert upstream["tools"] == tools
     assert upstream["tool_choice"] == "required"
     assert upstream["parallel_tool_calls"] is False
-    # Assistant tool calls may omit content, as OpenAI-compatible clients do.
+    # Assistant tool calls may omit content or carry null, as OpenAI-compatible
+    # clients do; both are forwarded as "" (some upstreams reject null).
     messages += [{"role": "assistant", "tool_calls": [call]},
-                 {"role": "tool", "tool_call_id": "call-local", "content": "actual output"}]
+                 {"role": "tool", "tool_call_id": "call-local", "content": "actual output"},
+                 {"role": "user", "content": "and now?"},
+                 {"role": "assistant", "content": None, "tool_calls": [call]},
+                 {"role": "tool", "tool_call_id": "call-local", "content": "more"}]
     result = await client.post("/v1/chat/completions", headers=auth(), json={
         "model": "auto", "messages": messages, "tools": tools,
     })
     assert result.status_code == 200
-    assert fakes["npu"].requests[-1]["messages"] == messages
+    sent = fakes["gpu"].requests[-1]["messages"]
+    assert all(isinstance(m.get("content"), str) for m in sent)
+    assert sent[1]["content"] == "" and sent[4]["content"] == ""
     assert result.json()["choices"][0]["finish_reason"] == "stop"
 
 

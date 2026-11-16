@@ -264,6 +264,13 @@ The token alternative for the server remains: set an env var with a
 GitHub token and point `copilot: token_env` at it, e.g.
 `token_env: COPILOT_GITHUB_TOKEN`.
 
+If no token env var is set, the server runs `gh auth token` and uses the
+result, so signing in with the [GitHub CLI](https://cli.github.com)
+(`gh auth login`) is enough; meatproxy stores nothing itself and the token
+stays in `gh`'s credential store. Order: `token_env`, then `gh`, then the
+`copilot login` credentials. The token is read at startup, so restart
+meatproxy after re-authenticating.
+
 The Copilot CLI runtime is downloaded at image build time
 (`python -m copilot download-runtime`), so the image is self-contained.
 

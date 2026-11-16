@@ -103,7 +103,7 @@ async def test_login_consent_assume_yes(monkeypatch):
     )
 
     assert name == "octocat"
-    assert consent_inputs(client.accounts_api.login) == ["yes"]
+    assert consent_inputs(client.accounts_api.login) == ["allow"]
 
 
 async def test_login_consent_retries_then_fails(monkeypatch):
@@ -124,7 +124,7 @@ async def test_login_consent_retries_then_fails(monkeypatch):
         )
 
     login_api = client.accounts_api.login
-    assert consent_inputs(login_api) == ["yes", "y"]
+    assert consent_inputs(login_api) == ["allow", "yes"]
     assert login_api.cancelled == ["flow-1"]
 
 
@@ -152,7 +152,7 @@ async def test_login_consent_declined_interactive(monkeypatch):
             out=lambda s: None,
         )
 
-    assert consent_inputs(client.accounts_api.login) == ["n"]
+    assert consent_inputs(client.accounts_api.login) == ["deny"]
 
 
 async def test_login_interactive_consent_not_understood(monkeypatch):
