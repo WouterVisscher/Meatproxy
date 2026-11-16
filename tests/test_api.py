@@ -50,6 +50,21 @@ async def test_auto_openai_tool_calls_and_results(client, fakes, stream):
     assert result.json()["choices"][0]["finish_reason"] == "stop"
 
 
+async def test_tool_choice_none_stays_light(client, fakes):
+    # tool_choice: "none" opts out of tool calling, so the request is not
+    # tool-bearing and is not raised from light to the mid tier.
+    tools = [{"type": "function", "function": {"name": "echo", "parameters": {"type": "object"}}}]
+    result = await client.post("/v1/chat/completions", headers=auth(), json={
+        "model": "auto", "messages": [{"role": "user", "content": "hi"}],
+        "tools": tools, "tool_choice": "none",
+    })
+    assert result.status_code == 200
+    upstream = fakes["npu"].requests[-1]
+    assert upstream["tools"] == tools
+    assert upstream["tool_choice"] == "none"
+    assert fakes["gpu"].requests == []
+
+
 async def test_tool_result_requires_call_id(client):
     result = await client.post("/v1/chat/completions", headers=auth(), json={
         "messages": [{"role": "user", "content": "hi"}, {"role": "tool", "content": "result"}],

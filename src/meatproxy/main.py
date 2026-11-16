@@ -185,7 +185,15 @@ def _request_tool_bearing(extra: dict[str, Any], messages: list[dict[str, Any]])
     results or assistant tool_calls in the transcript). The router
     routes such requests to at least the mid tier (see
     Router._raise_for_tool_bearing)."""
-    return bool(extra.get("tools")) or "tool_choice" in extra or has_tool_history(messages)
+    tool_choice = extra.get("tool_choice")
+    if tool_choice == "none":
+        # explicitly opted out of tool calling; a plain-text answer suffices
+        return False
+    return (
+        bool(extra.get("tools"))
+        or tool_choice is not None
+        or has_tool_history(messages)
+    )
 
 
 def _normalize_messages(messages: list[dict[str, Any]]) -> None:
