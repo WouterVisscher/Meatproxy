@@ -89,7 +89,10 @@ def build_registry(
             )
         upstream[name] = spec.model
         model_backends[name] = backends[endpoint]
-    return OpenAIRegistry(backends, upstream, model_backends)
+    no_think = frozenset(
+        name for name, spec in cfg.models.items() if spec.kind == "openai" and spec.no_think
+    )
+    return OpenAIRegistry(backends, upstream, model_backends, no_think)
 
 
 def _first_api_key(cfg: Config, endpoint: str) -> str | None:

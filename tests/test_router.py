@@ -210,3 +210,30 @@ async def test_triage_timeout_routes_to_on_failure(tmp_path, fakes):
     plan = await router.plan("auto", "hello", cfg)
     assert plan.source == "triage-failure"
     assert plan.models[0].name == "onprem"
+
+
+async def test_registry_injects_no_think_marker(tmp_path, fakes):
+    from meatproxy.openai_client import NO_THINK_MARKER
+
+    content = TEST_CONFIG.replace(
+        "npu-small: {tier: light, endpoint: http://npu/v1, model: fastflow-small}",
+        "npu-small: {tier: light, endpoint: http://npu/v1, model: fastflow-small, no_think: true}",
+    )
+    router, cfg, state = make_router(tmp_path, fakes, content=content)
+    registry = state.pool.current
+
+    messages = [{"role": "user", "content": "hi"}]
+    async for _ in registry.stream("npu-small", messages, {}, 5.0):
+        pass
+    sent = fakes["npu"].requests[-1]["messages"]
+    assert sent[0]["content"].startswith(NO_THINK_MARKER + " ")
+    assert sent[0]["content"] == f"{NO_THINK_MARKER} hi"
+    # the caller's messages list is not mutated
+    assert messages == [{"role": "user", "content": "hi"}]
+
+    # a model without no_think gets the original content
+    async for _ in registry.stream("onprem", [{"role": "user", "content": "hi"}], {}, 5.0):
+        pass
+    sent = fakes["gpu"].requests[-1]["messages"]
+    assert sent[0]["content"] == "hi"
+    assert NO_THINK_MARKER not in sent[0]["content"]

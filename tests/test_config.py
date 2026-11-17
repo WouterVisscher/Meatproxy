@@ -38,6 +38,18 @@ def test_load_valid(tmp_path):
     assert cfg.model("small").tier == "light"
 
 
+def test_no_think_flag(tmp_path):
+    cfg = load_config(_write(
+        tmp_path,
+        VALID.replace(
+            "small: {tier: light, endpoint: http://a/v1, model: s}",
+            "small: {tier: light, endpoint: http://a/v1, model: s, no_think: true}",
+        ),
+    ))
+    assert cfg.model("small").no_think is True
+    assert cfg.model("big").no_think is False
+
+
 def test_missing_models(tmp_path):
     with pytest.raises(ConfigError, match="models"):
         load_config(_write(tmp_path, "routing:\n  chains:\n    light: []\n"))

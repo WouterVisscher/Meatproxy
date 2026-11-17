@@ -141,10 +141,12 @@ def build_triage(cfg: Config, pool: BackendPool) -> Triage | None:
         return None
     spec = cfg.triage
     registry = pool.current
+    model_spec = cfg.models.get(spec.model)
     return Triage(
         spec=spec,
         backend=registry.backend_for(spec.model),
         upstream_model=registry.upstream_for(spec.model),
+        no_think=bool(model_spec is not None and model_spec.no_think),
     )
 
 

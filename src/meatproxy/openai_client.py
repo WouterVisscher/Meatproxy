@@ -57,6 +57,38 @@ def _error_message(error: Any) -> str:
     return str(error)
 
 
+NO_THINK_MARKER = "<no_think>"
+
+
+def with_no_think(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy of ``messages`` with a no-think marker in the first user message.
+
+    Qwen3 chat templates switch a turn off thinking when any user message
+    carries the marker, so prepending it to the first user message is enough
+    (even for multi-turn history). The caller's list is never mutated.
+    """
+    result = [dict(m) for m in messages]
+    for index, message in enumerate(result):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            result[index]["content"] = f"{NO_THINK_MARKER} {content}"
+        elif isinstance(content, list):
+            parts = [dict(p) for p in content]
+            for part in parts:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    part["text"] = f"{NO_THINK_MARKER} {part['text']}"
+                    break
+            else:
+                parts.append({"type": "text", "text": NO_THINK_MARKER})
+            result[index]["content"] = parts
+        else:
+            result[index]["content"] = NO_THINK_MARKER
+        return result
+    return result
+
+
 @dataclass
 class RawChunk:
     """One upstream OpenAI chat.completion.chunk, model field already rewritten."""
@@ -206,10 +238,12 @@ class OpenAIRegistry:
         backends: dict[str, OpenAIBackend],
         upstream: dict[str, str],
         model_backends: dict[str, OpenAIBackend],
+        no_think: frozenset[str] = frozenset(),
     ) -> None:
         self._backends = backends  # endpoint -> backend
         self._upstream = upstream  # model name -> upstream model name
         self._model_backends = model_backends  # model name -> backend
+        self._no_think = no_think  # virtual names needing the no-think marker
 
     def stream(
         self,
@@ -220,6 +254,8 @@ class OpenAIRegistry:
     ) -> AsyncIterator[StreamEvent]:
         backend = self._model_backends[model_name]
         upstream_model = self._upstream[model_name]
+        if model_name in self._no_think:
+            messages = with_no_think(messages)
         chunks = backend.stream_chat(upstream_model, messages, extra)
         return _with_first_chunk_timeout(chunks, first_chunk_timeout_s, model_name)
 

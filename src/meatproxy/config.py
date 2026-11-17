@@ -35,6 +35,7 @@ class ModelSpec:
     timeout_s: float = 60.0
     ca_bundle: str | None = None  # path to a CA bundle for internal CAs
     ssl_insecure: bool = False  # skip TLS verification entirely (not recommended)
+    no_think: bool = False  # prepend <no_think> so Qwen3 thinking models answer directly
 
     def __post_init__(self) -> None:
         if self.kind not in ("openai", "copilot"):
@@ -131,6 +132,7 @@ def _model_spec(name: str, raw: Any) -> ModelSpec:
         timeout_s=float(raw.get("timeout_s", 60.0)),
         ca_bundle=raw.get("ca_bundle"),
         ssl_insecure=bool(raw.get("ssl_insecure", False)),
+        no_think=bool(raw.get("no_think", False)),
     )
 
 

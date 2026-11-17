@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from meatproxy.config import TriageSpec
-from meatproxy.openai_client import OpenAIBackend
+from meatproxy.openai_client import NO_THINK_MARKER, OpenAIBackend
 from meatproxy.triage import (
     LEGACY_REASON, TRIAGE_MAX_TOKENS, Triage, TriageUnavailable,
     _parse_decision, _parse_tier,
@@ -31,10 +31,11 @@ def _backend(responses: list[str], calls: list) -> OpenAIBackend:
     )
 
 
-def _triage(backend) -> Triage:
+def _triage(backend, no_think: bool = False) -> Triage:
     return Triage(
         spec=TriageSpec(model="npu-small", timeout_s=2.0, on_failure="copilot", cache_ttl_s=300),
         backend=backend,
+        no_think=no_think,
         upstream_model="fastflow-small",
     )
 
@@ -65,6 +66,22 @@ async def test_classify_and_cache():
     assert first.tier == "light" and first.cached is False
     assert second.cached is True
     assert len(calls) == 1  # cache hit, no second upstream call
+
+
+async def test_no_think_marker_injected():
+    calls: list = []
+    triage = _triage(_backend(["light"], calls), no_think=True)
+    assert (await triage.classify("say hi")).tier == "light"
+    user_msg = next(m for m in calls[0]["messages"] if m["role"] == "user")
+    assert user_msg["content"].startswith(NO_THINK_MARKER + " ")
+
+
+async def test_no_think_marker_absent_by_default():
+    calls: list = []
+    triage = _triage(_backend(["light"], calls))
+    await triage.classify("say hi")
+    user_msg = next(m for m in calls[0]["messages"] if m["role"] == "user")
+    assert NO_THINK_MARKER not in user_msg["content"]
 
 
 async def test_summary_is_cached():

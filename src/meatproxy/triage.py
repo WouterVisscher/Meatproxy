@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from .config import TIER_ORDER, TriageSpec
-from .openai_client import OpenAIBackend
+from .openai_client import OpenAIBackend, with_no_think
 
 DEFAULT_SYSTEM = (
     "You are a routing classifier for an LLM gateway. Decide which tier of "
@@ -46,6 +46,7 @@ class Triage:
     spec: TriageSpec
     backend: OpenAIBackend
     upstream_model: str
+    no_think: bool = False
     _cache: dict[str, tuple[TriageDecision, float]] = field(default_factory=dict)
     _cache_max: int = 1024
 
@@ -75,6 +76,8 @@ class Triage:
             {"role": "system", "content": system},
             {"role": "user", "content": text[:4000]},
         ]
+        if self.no_think:
+            messages = with_no_think(messages)
         try:
             answer = await self.backend.complete(
                 self.upstream_model,
